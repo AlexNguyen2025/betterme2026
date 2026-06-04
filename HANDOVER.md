@@ -25,8 +25,11 @@ Chủ sở hữu: **Tuan (Admin_Tuan_123)** — người dùng duy nhất, khôn
 | UI Framework | React 18 (JSX, không TypeScript) |
 | Build Tool | Vite 8 |
 | Styling | Tailwind CSS v4 (PostCSS approach) |
+| Charts | Recharts |
+| Excel Export | xlsx (SheetJS) |
 | Backend / DB | Firebase Firestore (Realtime sync) |
 | Auth | Firebase Anonymous Auth |
+| PWA | vite-plugin-pwa (Workbox) |
 | Hosting | Vercel (auto-deploy từ GitHub `main` branch) |
 
 **Không có:** Router, Redux, custom backend, REST API. Toàn bộ state management bằng `useState` + `useEffect` thuần.
@@ -40,11 +43,11 @@ Betterme2026/
 ├── src/
 │   ├── App.jsx          ← TOÀN BỘ logic + UI nằm ở đây (single-file architecture)
 │   ├── main.jsx         ← Entry point, mount App vào #root
-│   └── index.css        ← Chỉ có @import "tailwindcss" + @config
+│   └── index.css        ← @import tailwindcss + @config + @custom-variant dark
 ├── index.html
 ├── tailwind.config.js   ← content paths cho Tailwind v4
 ├── postcss.config.js    ← @tailwindcss/postcss + autoprefixer
-├── vite.config.js       ← Vite + @vitejs/plugin-react
+├── vite.config.js       ← Vite + @vitejs/plugin-react + VitePWA
 ├── package.json
 └── HANDOVER.md          ← File này
 ```
@@ -140,21 +143,65 @@ users/
 - Auto-save khi blur
 
 ### Tab 4 — Stats
-- Bar chart 7 ngày gần nhất (SVG thuần, không dùng thư viện chart)
-- Nút "Xuất Excel" (chưa implement — placeholder)
+- **Streak counter**: đếm ngày liên tiếp có điểm ≥ `STREAK_MIN` (= 60) và đã chốt sổ
+- **Trung bình tháng**: tính từ toàn bộ ngày đã submitted trong tháng hiện tại
+- **Recharts BarChart**: 7 ngày gần nhất, màu theo mức điểm (đen ≥80 / xám ≥60 / nhạt <60 hoặc chưa chốt)
+- **Xuất Excel** (`xlsx`): toàn bộ history — điểm, nhật ký, bữa ăn, calo, reflections
+- **Backup JSON**: download raw Firestore data dạng `.json`
+- **Notification toggle**: bật/tắt nhắc nhở 21:00 mỗi ngày qua Web Notification API
 
-### Điều hướng ngày
-- Nút ← → để xem lại lịch sử
-- Nút → bị disabled khi đang ở "Hôm nay"
-
-### Sync
-- `onSnapshot` = realtime sync Firestore
-- Auto-save khi thay đổi task status hoặc blur khỏi text field
-- Badge trạng thái: "Đang lưu..." / "Đã lưu Cloud ✓" / "Lỗi kết nối"
+### Global
+- **Dark mode**: toggle sun/moon ở header, lưu vào `localStorage`, áp dụng `.dark` class lên `<html>`
+- **PWA**: installable trên mobile/desktop qua `vite-plugin-pwa` + Workbox service worker
+- Điều hướng ngày ← → (nút → disabled khi ở "Hôm nay")
+- Realtime sync qua `onSnapshot`, badge trạng thái sync
 
 ---
 
-## 7. Cách deploy
+## 7. Chi tiết kỹ thuật các tính năng mới
+
+### Dark mode
+- State `isDark` khởi tạo từ `localStorage` hoặc `prefers-color-scheme`
+- `useEffect` toggle class `.dark` trên `document.documentElement`
+- CSS: `@custom-variant dark (&:where(.dark, .dark *))` trong `src/index.css` — đây là cú pháp Tailwind v4 native để override dark variant sang class strategy
+- Tất cả màu sắc dùng cặp `bg-white dark:bg-gray-900`, `text-black dark:text-white`, v.v.
+
+### Streak counter
+- Hằng số `STREAK_MIN = 60` — ngưỡng điểm tối thiểu để tính là "ngày tốt"
+- Logic: đi lùi từ hôm nay, bỏ qua ngày hôm nay nếu chưa chốt sổ, đếm liên tiếp cho đến khi gặp ngày không đạt
+- Thay đổi ngưỡng: chỉ sửa hằng số `STREAK_MIN` ở đầu file
+
+### Recharts BarChart
+- `ResponsiveContainer` + `BarChart` từ `recharts`
+- Màu bar tính bằng hàm `barColor(entry)` nhận `{earned, submitted}`
+- Tooltip style theo `isDark` để khớp với theme
+- Axis color dùng biến `axisColor` tính từ `isDark`
+
+### Xuất Excel
+- Dùng `XLSX.utils.json_to_sheet()` + `XLSX.writeFile()`
+- Mỗi row = 1 ngày với đầy đủ 15 cột
+- File tên: `BetterMe_YYYY-MM-DD.xlsx`
+
+### Backup JSON
+- `URL.createObjectURL(new Blob(...))` + click ảo — không cần server
+- File tên: `BetterMe_backup_YYYY-MM-DD.json`
+
+### Notifications
+- State `notifPermission` sync với `Notification.permission`
+- `toggleNotif()`: nếu chưa có permission thì gọi `Notification.requestPermission()`
+- `useEffect` chạy `setInterval` mỗi 60 giây, check giờ === 21 && phút ≤ 2
+- Dùng `localStorage` key `notified_YYYY-MM-DD` để tránh nhắc nhiều lần trong ngày
+- iOS Safari không hỗ trợ Notification API — toggle sẽ không có tác dụng trên iPhone
+
+### PWA
+- `vite-plugin-pwa` trong `vite.config.js` với `registerType: 'autoUpdate'`
+- Manifest: name, short_name, display standalone, orientation portrait, icon SVG
+- Service worker Workbox tự cache các file JS/CSS/HTML/SVG
+- Để install được trên Android Chrome: cần thêm PNG icon 192×192 và 512×512 vào `public/` và manifest
+
+---
+
+## 8. Cách deploy
 
 **Auto-deploy:** Mỗi lần push lên `main` branch, Vercel tự động build và deploy.
 
@@ -166,23 +213,23 @@ npx vercel --prod
 **Build command:** `vite build`  
 **Output directory:** `dist`
 
----
-
-## 8. Những thứ chưa làm / TODO
-
-- [ ] **Xuất Excel** (Tab Stats → nút placeholder chưa có logic) — dùng `xlsx` hoặc `exceljs`
-- [ ] **Chart đẹp hơn** — có thể dùng `recharts` hoặc `chart.js`
-- [ ] **Streak counter** — đếm số ngày liên tiếp đạt điểm cao
-- [ ] **Notification / Reminder** — nhắc nhở buổi tối chấm điểm
-- [ ] **Dark mode** — Tailwind đã hỗ trợ, chỉ cần thêm `dark:` classes
-- [ ] **PWA** — thêm `vite-plugin-pwa` để cài như app trên điện thoại
-- [ ] **Backup / Export JSON** — export toàn bộ Firestore data
+> **Lưu ý Windows:** Nếu gặp lỗi "running scripts is disabled", chạy trước:  
+> `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`
 
 ---
 
-## 9. Cách thêm task mới
+## 9. TODO còn lại
 
-Mở `src/App.jsx`, tìm `const baseTasks = [...]`, thêm object theo format:
+- [ ] **PWA icon PNG** — thêm `public/icon-192.png` và `public/icon-512.png` vào manifest để installable đầy đủ trên Android
+- [ ] **Biểu đồ tháng** — mở rộng Stats tab: chart theo tháng thay vì chỉ 7 ngày
+- [ ] **Thống kê chi tiết** — ngày tốt nhất, category nào hay thấp điểm nhất
+- [ ] **iOS notification** — hiện Web Notification API không hỗ trợ iOS Safari
+
+---
+
+## 10. Cách thêm task mới
+
+Mở `src/App.jsx`, tìm `const baseTasks = [...]`, thêm object:
 
 ```js
 { id: 18, text: 'Nội dung câu hỏi', weight: 7, type: 'rating', category: 'Chăm sóc bản thân' }
@@ -195,9 +242,7 @@ Mở `src/App.jsx`, tìm `const baseTasks = [...]`, thêm object theo format:
 
 ---
 
-## 10. Cách build app tương tự từ đầu
-
-Stack đã được kiểm chứng hoạt động tốt:
+## 11. Cách build app tương tự từ đầu
 
 ```bash
 # 1. Khởi tạo
@@ -206,22 +251,29 @@ npm install
 
 # 2. Cài thư viện
 npm install firebase tailwindcss postcss autoprefixer @tailwindcss/postcss
+npm install xlsx recharts vite-plugin-pwa
 
 # 3. Tailwind v4 config
-# postcss.config.js → { '@tailwindcss/postcss': {}, autoprefixer: {} }
+# postcss.config.js  → { '@tailwindcss/postcss': {}, autoprefixer: {} }
 # tailwind.config.js → content: ["./index.html", "./src/**/*.{js,jsx}"]
-# src/index.css → @import "tailwindcss"; @config "../tailwind.config.js";
+# src/index.css      → @import "tailwindcss";
+#                      @config "../tailwind.config.js";
+#                      @custom-variant dark (&:where(.dark, .dark *));
 
-# 4. Firebase
+# 4. PWA — vite.config.js
+# import { VitePWA } from 'vite-plugin-pwa'
+# plugins: [react(), VitePWA({ registerType: 'autoUpdate', manifest: {...} })]
+
+# 5. Firebase
 # - Tạo project tại console.firebase.google.com
 # - Enable Firestore + Anonymous Auth
 # - Copy firebaseConfig vào App.jsx
 
-# 5. Deploy
+# 6. Deploy
 git init && git add . && git commit -m "init"
 git remote add origin <github-url>
 git push -u origin main
-npx vercel --prod  # connect GitHub repo khi được hỏi
+npx vercel --prod
 ```
 
 **Firestore Security Rules tối thiểu (cho anonymous auth):**
@@ -238,7 +290,7 @@ service cloud.firestore {
 
 ---
 
-## 11. Môi trường phát triển
+## 12. Môi trường phát triển
 
 - OS: Windows 11 Enterprise
 - Node.js: v22.11.0
@@ -248,4 +300,4 @@ service cloud.firestore {
 
 ---
 
-*Handover được tạo ngày 2026-06-04. Cập nhật file này mỗi khi có thay đổi kiến trúc lớn.*
+*Cập nhật lần cuối: 2026-06-04 — Phiên bản 2: thêm dark mode, recharts, streak, notifications, PWA, Excel/JSON export.*
