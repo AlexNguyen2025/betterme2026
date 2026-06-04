@@ -341,6 +341,7 @@ export default function App() {
     await setDoc(doc(db, 'users', myUserId, 'daily_logs', selectedDateStr), { status: 'submitted' }, { merge: true });
   };
   const handleRevise = async () => {
+    setShowConfirmModal(false); // đóng modal nếu còn mở
     setIsSubmitted(false);
     await setDoc(doc(db, 'users', myUserId, 'daily_logs', selectedDateStr), { status: 'draft' }, { merge: true });
   };
@@ -705,8 +706,8 @@ export default function App() {
 
         {/* ── MODAL ──────────────────────────────────────────────────────── */}
         {showConfirmModal && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-6">
-            <div className="bg-white dark:bg-gray-900 border dark:border-gray-700 rounded-3xl p-6 w-full max-w-sm shadow-xl">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-6" onClick={() => setShowConfirmModal(false)}>
+            <div className="bg-white dark:bg-gray-900 border dark:border-gray-700 rounded-3xl p-6 w-full max-w-sm shadow-xl" onClick={e => e.stopPropagation()}>
               <h3 className="text-lg font-black text-black dark:text-white mb-2">Chốt sổ ngày này?</h3>
               <p className="text-[13px] text-gray-500 dark:text-gray-400 font-medium mb-6">Bạn vẫn có thể mở khóa để sửa nếu cần. Dữ liệu sẽ được đồng bộ.</p>
               <div className="flex gap-3">
