@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, onSnapshot } from 'firebase/firestore';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from 'recharts';
 import * as XLSX from 'xlsx';
 
 const firebaseConfig = {
@@ -18,7 +18,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const myUserId = "Admin_Tuan_123";
-const STREAK_MIN = 60;
+const STREAK_MIN = 80;
 
 const baseTasks = [
   { id: 15, text: 'Bạn có tập luyện cardio?', weight: 8, type: 'rating', category: 'Chăm sóc bản thân' },
@@ -206,25 +206,41 @@ export default function App() {
     const now = new Date();
     const prefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const logs = history.filter(h => h.date.startsWith(prefix) && h.status === 'submitted');
-    if (!logs.length) return 0;
-    return Math.round(logs.reduce((s, l) => s + (l.earnedPoints || 0), 0) / logs.length);
+    if (!logs.length) return null;
+    const total = logs.reduce((s, l) => {
+      const pts = l.earnedPoints != null ? l.earnedPoints : calculateScore(l.tasks || []).earned;
+      return s + pts;
+    }, 0);
+    return Math.round(total / logs.length);
   };
 
-  // ── Chart data (7 days) ─────────────────────────────────────────────────
+  // ── Chart data (30 days, scrollable) ────────────────────────────────────
   const getChartData = () => {
     const today = new Date();
-    return Array.from({ length: 7 }, (_, i) => {
+    return Array.from({ length: 30 }, (_, i) => {
       const d = new Date(today);
-      d.setDate(today.getDate() - (6 - i));
+      d.setDate(today.getDate() - (29 - i));
       const dateStr = getDateStr(d);
       const log = history.find(h => h.date === dateStr);
       return {
-        day: i === 6 ? 'Nay' : d.toLocaleDateString('vi-VN', { weekday: 'short' }),
-        earned: log ? (log.earnedPoints || calculateScore(log.tasks || []).earned) : 0,
+        day: `${d.getDate()}/${d.getMonth() + 1}`,
+        earned: log ? (log.earnedPoints != null ? log.earnedPoints : calculateScore(log.tasks || []).earned) : 0,
         submitted: log?.status === 'submitted'
       };
     });
   };
+
+  // ── Refs ─────────────────────────────────────────────────────────────────
+  const chartScrollRef = useRef(null);
+
+  useEffect(() => {
+    if (activeTab === 'stats') {
+      setTimeout(() => {
+        if (chartScrollRef.current)
+          chartScrollRef.current.scrollLeft = chartScrollRef.current.scrollWidth;
+      }, 80);
+    }
+  }, [activeTab, history]);
 
   // ── Derived values ──────────────────────────────────────────────────────
   const score = calculateScore(todayTasks);
@@ -351,7 +367,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 font-sans flex justify-center">
-      <div className={`w-full max-w-md bg-white dark:bg-gray-900 min-h-screen flex flex-col relative pb-32 border-x border-gray-100 dark:border-gray-800 shadow-xl`}>
+      <div className={`w-full max-w-md bg-white dark:bg-gray-900 min-h-screen flex flex-col relative pb-36 border-x border-gray-100 dark:border-gray-800 shadow-xl`}>
 
         {/* ── HEADER ─────────────────────────────────────────────────────── */}
         <div className="sticky top-0 z-30 bg-white/90 dark:bg-gray-900/90 backdrop-blur-md px-6 py-5 border-b border-gray-100 dark:border-gray-800">
@@ -575,33 +591,40 @@ export default function App() {
                 <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700">
                   <p className="text-[9px] text-gray-400 uppercase tracking-widest font-bold mb-1">TB tháng này 📊</p>
                   <div className="flex items-end gap-1.5">
-                    <span className="text-3xl font-black text-black dark:text-white">{monthlyAvg}</span>
-                    <span className="text-gray-400 text-xs pb-0.5">/ 100</span>
+                    <span className="text-3xl font-black text-black dark:text-white">{monthlyAvg ?? '—'}</span>
+                    <span className="text-gray-400 text-xs pb-0.5">{monthlyAvg != null ? '/ 100' : 'chưa có'}</span>
                   </div>
                 </div>
               </div>
 
-              {/* Recharts bar chart */}
+              {/* Recharts bar chart — 30 days scrollable */}
               <div className={`${card} p-4 shadow-sm`}>
-                <h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm mb-4">Điểm 7 ngày gần nhất</h3>
-                <ResponsiveContainer width="100%" height={180}>
-                  <BarChart data={chartData} margin={{ top: 18, right: 4, left: -28, bottom: 0 }}>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm">30 ngày gần nhất</h3>
+                  <span className="text-[10px] text-gray-400 italic">← vuốt để xem</span>
+                </div>
+                <div
+                  ref={chartScrollRef}
+                  className="overflow-x-auto -mx-4 px-2"
+                  style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                >
+                  <BarChart width={chartData.length * 36} height={175} data={chartData} margin={{ top: 18, right: 8, left: -28, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#f3f4f6'} vertical={false} />
-                    <XAxis dataKey="day" tick={{ fontSize: 11, fill: axisColor }} axisLine={false} tickLine={false} />
+                    <XAxis dataKey="day" tick={{ fontSize: 9, fill: axisColor }} axisLine={false} tickLine={false} interval={0} />
                     <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
                     <Tooltip
                       cursor={{ fill: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)' }}
                       contentStyle={{ backgroundColor: isDark ? '#1f2937' : '#fff', border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: 8, color: isDark ? '#f9fafb' : '#111', fontSize: 12 }}
                       formatter={v => [`${v} điểm`, '']}
                     />
-                    <Bar dataKey="earned" radius={[4, 4, 0, 0]} maxBarSize={40}>
+                    <Bar dataKey="earned" radius={[3, 3, 0, 0]} maxBarSize={28}>
                       {chartData.map((entry, i) => <Cell key={i} fill={barColor(entry)} />)}
                     </Bar>
                   </BarChart>
-                </ResponsiveContainer>
+                </div>
                 <div className="flex gap-4 mt-3 justify-center">
                   {[
-                    { color: isDark ? 'bg-white' : 'bg-black', label: '≥ 80' },
+                    { color: isDark ? 'bg-white' : 'bg-black', label: `≥ 80 (streak)` },
                     { color: 'bg-gray-400', label: '≥ 60' },
                     { color: isDark ? 'bg-gray-600' : 'bg-gray-200', label: 'Chưa đạt' }
                   ].map(l => (
@@ -653,7 +676,7 @@ export default function App() {
         </div>
 
         {/* ── FOOTER ─────────────────────────────────────────────────────── */}
-        <div className="fixed bottom-0 w-full max-w-md bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 px-5 pb-24 pt-3 z-40 shadow-[0_-10px_30px_rgba(0,0,0,0.05)]">
+        <div className="fixed bottom-0 w-full max-w-md bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 px-5 pt-3 z-40 shadow-[0_-10px_30px_rgba(0,0,0,0.05)]" style={{ paddingBottom: 'max(10px, env(safe-area-inset-bottom, 10px))' }}>
           <div className="mb-3">
             {!isSubmitted
               ? <button onClick={() => setShowConfirmModal(true)} className="w-full bg-black text-white font-bold py-3.5 rounded-xl text-xs tracking-widest uppercase shadow-lg active:scale-95 transition-transform">CHỐT SỔ HÔM NAY</button>
