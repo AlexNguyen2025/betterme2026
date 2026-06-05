@@ -10,7 +10,7 @@
 **Better Me 2026** là một personal daily tracker app dạng mobile-first (max-width 448px), chạy trên web.  
 Chủ sở hữu: **Tuan (Admin_Tuan_123)** — người dùng duy nhất, không có hệ thống multi-user.
 
-**Mục đích:** Tuan tự chấm điểm bản thân mỗi ngày theo các tiêu chí cá nhân, ghi nhật ký ăn uống, nhật ký tự do, và theo dõi xu hướng điểm số theo tuần.
+**Mục đích:** Tuan tự chấm điểm bản thân mỗi ngày theo các tiêu chí cá nhân, theo dõi calo nạp vào / đốt ra, ghi nhật ký tự do, và theo dõi xu hướng điểm số + calo theo 30 ngày.
 
 **Live URL:** https://betterme2026.vercel.app  
 **GitHub:** https://github.com/AlexNguyen2025/betterme2026  
@@ -25,14 +25,14 @@ Chủ sở hữu: **Tuan (Admin_Tuan_123)** — người dùng duy nhất, khôn
 | UI Framework | React 18 (JSX, không TypeScript) |
 | Build Tool | Vite 8 |
 | Styling | Tailwind CSS v4 (PostCSS approach) |
-| Charts | Recharts |
+| Charts | Recharts (BarChart + ReferenceLine) |
 | Excel Export | xlsx (SheetJS) |
 | Backend / DB | Firebase Firestore (Realtime sync) |
 | Auth | Firebase Anonymous Auth |
 | PWA | vite-plugin-pwa (Workbox) |
 | Hosting | Vercel (auto-deploy từ GitHub `main` branch) |
 
-**Không có:** Router, Redux, custom backend, REST API. Toàn bộ state management bằng `useState` + `useEffect` thuần.
+**Không có:** Router, Redux, custom backend, REST API. Toàn bộ state management bằng `useState` + `useEffect` + `useRef` thuần.
 
 ---
 
@@ -60,50 +60,49 @@ Betterme2026/
 
 ```
 users/
-  Admin_Tuan_123/           ← hardcoded userId, không bao giờ thay đổi
+  Admin_Tuan_123/               ← hardcoded userId, không bao giờ thay đổi
     daily_logs/
-      2026-06-04/           ← document ID = date string (YYYY-MM-DD)
-        date: "2026-06-04"
+      2026-06-05/               ← document ID = date string (YYYY-MM-DD)
+        date: "2026-06-05"
         status: "draft" | "submitted"
-        tasks: [            ← array of task states
+        tasks: [
           { id: 15, status: "good"|"bad"|"average"|"quite_good"|"completed"|"failed"|"pending"|"na", comment: "" }
         ]
-        dailyJournal: ""    ← nhật ký tự do
+        dailyJournal: ""
         meals: {
-          breakfastText, breakfastCal,
-          lunchText, lunchCal,
-          dinnerText, dinnerCal,
-          snackText, snackCal
+          breakfastCal, lunchCal, dinnerCal, snackCal,   ← kcal từng bữa (chỉ số, không ghi tên)
+          caloriesBurned,                                 ← calo đốt khi tập
+          ruouMl,                                         ← rượu mạnh (ml)
+          ruouVangMl,                                     ← rượu vang (ml)
+          bia500Cans,                                     ← lon bia 500ml
+          bia330Cans                                      ← lon bia 330ml
         }
-        reflections: {
-          proud: "", better: "", lesson: ""
-        }
-        percent: 72         ← điểm % đã tính sẵn (cache)
+        reflections: { proud: "", better: "", lesson: "" }
+        percent: 72
         earnedPoints: 72
         totalPoints: 100
+        netCalories: 1450       ← calo NET = nạp vào − đốt (lưu sẵn để stats)
 ```
 
-**Lưu ý:** `myUserId = "Admin_Tuan_123"` được hardcode trong App.jsx. Anonymous Auth chỉ để satisfy Firebase security rules — Tuan không login bằng email/password.
+**Lưu ý:** `myUserId = "Admin_Tuan_123"` được hardcode trong App.jsx. Anonymous Auth chỉ để satisfy Firebase security rules.
 
 ---
 
 ## 5. Logic tính điểm
 
-Đây là phần cốt lõi của app — đọc kỹ trước khi sửa.
-
 ### Hai loại task:
-- **`binary`**: Có / Đạt (`completed` = 100% weight) hoặc Không (`failed` = 0%)
-- **`rating`**: 4 mức — `good` (100%), `quite_good` (80%), `average` (50%), `bad` (0%)
+- **`binary`**: `completed` = 100% weight, `failed` = 0%
+- **`rating`**: `good` (100%), `quite_good` (80%), `average` (50%), `bad` (0%)
 
 ### Công thức:
-1. Tính `totalValidWeight` = tổng `weight` của tất cả task **không phải `na`**
-2. Mỗi task được chuẩn hóa: `normalizedWeight = (task.weight / totalValidWeight) * 100`
-3. `earnedRaw` += `normalizedWeight * factor` (factor theo bảng trên)
-4. `percent = Math.round(earnedRaw)` → thang điểm **0–100**
+1. `totalValidWeight` = tổng weight của tất cả task **không phải `na`**
+2. `normalizedWeight = (task.weight / totalValidWeight) * 100`
+3. `earnedRaw += normalizedWeight * factor`
+4. `percent = Math.round(earnedRaw)` → thang **0–100**
 
-**Ý nghĩa:** Khi Tuan đánh N/A một task, các task còn lại tự động chiếm tỷ trọng cao hơn. Tổng luôn là 100.
+Khi đánh N/A, các task còn lại tự tăng tỷ trọng. Tổng luôn là 100.
 
-### Danh sách tasks hiện tại (`baseTasks`):
+### Danh sách tasks (`baseTasks`):
 
 | ID | Nội dung | Weight | Type | Category |
 |---|---|---|---|---|
@@ -125,109 +124,169 @@ users/
 
 ---
 
-## 6. Các tính năng hiện có
+## 6. Logic tính Calo
+
+### Hằng số (đầu file App.jsx):
+```js
+const CALORIE_BUDGET       = 1668;   // budget mỗi ngày của Tuan
+const CAL_PER_ML_RUOU      = 2.2;    // rượu mạnh: 1ml = 2.2 kcal
+const CAL_PER_ML_RUOU_VANG = 0.85;   // rượu vang: 1ml = 0.85 kcal
+const CAL_PER_LON_500      = 230;    // bia 500ml: 1 lon = 230 kcal
+const CAL_PER_LON_330      = 150;    // bia 330ml: 1 lon = 150 kcal
+```
+
+### Công thức NET:
+```
+netCal = foodCal + ruouCal + ruouVangCal + bia500Cal + bia330Cal − burnedCal
+```
+
+`netCalories` được lưu vào Firestore mỗi lần sync để dùng trong Stats.
+
+### Derived variables (trong component):
+```js
+const foodCal        = breakfastCal + lunchCal + dinnerCal + snackCal
+const ruouCal        = Math.round(ruouMl * 2.2)
+const ruouVangCal    = Math.round(ruouVangMl * 0.85)
+const bia500Cal      = bia500Cans * 230
+const bia330Cal      = bia330Cans * 150
+const totalIntakeCal = foodCal + ruouCal + ruouVangCal + bia500Cal + bia330Cal
+const burnedCal      = caloriesBurned
+const netCal         = totalIntakeCal - burnedCal
+const calDiff        = netCal - CALORIE_BUDGET   // âm = còn dư, dương = vượt
+```
+
+---
+
+## 7. Các tính năng hiện có (đầy đủ)
 
 ### Tab 1 — Performance
 - Điểm số realtime (0–100) với progress bar
-- Nhóm task theo 4 category
-- Mỗi task: đánh giá + ghi chú + N/A toggle
-- Lock/Unlock ngày (CHỐT SỔ / MỞ KHÓA)
-- Tự truy vấn cuối ngày: Điều tự hào / Cần làm tốt hơn / Bài học
+- Quote động lực ở đầu tab
+- Nhóm task theo 4 category với divider
+- Mỗi task: nút đánh giá (binary hoặc 4 mức rating) + input ghi chú + nút N/A
+- Nút **CHỐT SỔ** → confirm modal → lock toàn bộ dữ liệu ngày
+- Nút **MỞ KHÓA ĐỂ SỬA** → unlock ngay, không hỏi
+- Tự truy vấn cuối ngày: 3 textarea (Điều tự hào / Cần làm tốt hơn / Bài học)
 
 ### Tab 2 — Nutrition
-- Ghi 4 bữa ăn (tên món + kcal)
-- Tính tổng calo tự động
+- **4 bữa ăn** (Sáng / Trưa / Tối / Vặt): chỉ nhập kcal, layout 2 cột
+- **Calo đã đốt** 🏋️: nhập kcal tập luyện
+- **Rượu mạnh** 🥃: nhập ml, hiện kcal quy đổi (× 2.2)
+- **Rượu vang** 🍷: nhập ml, hiện kcal quy đổi (× 0.85)
+- **Bia** 🍺: lon 500ml (× 230 kcal) và lon 330ml (× 150 kcal)
+- **Bảng tổng kết** (card đen): liệt kê từng dòng, NET lớn, progress bar xanh/đỏ, so sánh với budget 1668
 
 ### Tab 3 — Diary
 - Textarea tự do, min-height 60vh
 - Auto-save khi blur
 
 ### Tab 4 — Stats
-- **Streak counter**: đếm ngày liên tiếp có điểm ≥ `STREAK_MIN` (= 60) và đã chốt sổ
-- **Trung bình tháng**: tính từ toàn bộ ngày đã submitted trong tháng hiện tại
-- **Recharts BarChart**: 7 ngày gần nhất, màu theo mức điểm (đen ≥80 / xám ≥60 / nhạt <60 hoặc chưa chốt)
-- **Xuất Excel** (`xlsx`): toàn bộ history — điểm, nhật ký, bữa ăn, calo, reflections
-- **Backup JSON**: download raw Firestore data dạng `.json`
-- **Notification toggle**: bật/tắt nhắc nhở 21:00 mỗi ngày qua Web Notification API
+**Điểm:**
+- Card đen: Streak ngày liên tiếp ≥ `STREAK_MIN` (= **80** điểm) và đã chốt sổ
+- Card xám: Trung bình điểm tháng hiện tại (chỉ ngày đã submitted)
+- BarChart 30 ngày (scrollable): đậm ≥80 / xám ≥60 / nhạt <60 / trống = chưa chốt
+
+**Calo:**
+- Card đen: Streak calo — ngày liên tiếp NET ≤ 1668 và đã chốt sổ
+- Card xám: Tổng NET calo tuần này vs budget tuần (1668×7 = 11,676)
+- BarChart 30 ngày (scrollable): **đậm** = đạt ≤1668 / **nhạt** = vượt / **trống** = chưa ghi; đường vàng kẻ ngang ở 1668
+
+**Export:**
+- Xuất Excel (.xlsx): mỗi ngày 1 row, 20+ cột bao gồm rượu/bia/calo NET
+- Backup JSON: full Firestore history
+
+**Settings:**
+- Toggle notification 21:00 mỗi ngày
 
 ### Global
-- **Dark mode**: toggle sun/moon ở header, lưu vào `localStorage`, áp dụng `.dark` class lên `<html>`
-- **PWA**: installable trên mobile/desktop qua `vite-plugin-pwa` + Workbox service worker
-- Điều hướng ngày ← → (nút → disabled khi ở "Hôm nay")
-- Realtime sync qua `onSnapshot`, badge trạng thái sync
+- **Dark mode**: toggle ☀️/🌙 ở header, persist `localStorage`
+- **PWA**: installable, service worker Workbox
+- Điều hướng ngày ← →
+- Realtime sync badge
 
 ---
 
-## 7. Chi tiết kỹ thuật các tính năng mới
+## 8. Luồng UX quan trọng
 
-### Dark mode
-- State `isDark` khởi tạo từ `localStorage` hoặc `prefers-color-scheme`
-- `useEffect` toggle class `.dark` trên `document.documentElement`
-- CSS: `@custom-variant dark (&:where(.dark, .dark *))` trong `src/index.css` — đây là cú pháp Tailwind v4 native để override dark variant sang class strategy
-- Tất cả màu sắc dùng cặp `bg-white dark:bg-gray-900`, `text-black dark:text-white`, v.v.
-
-### Streak counter
-- Hằng số `STREAK_MIN = 60` — ngưỡng điểm tối thiểu để tính là "ngày tốt"
-- Logic: đi lùi từ hôm nay, bỏ qua ngày hôm nay nếu chưa chốt sổ, đếm liên tiếp cho đến khi gặp ngày không đạt
-- Thay đổi ngưỡng: chỉ sửa hằng số `STREAK_MIN` ở đầu file
-
-### Recharts BarChart
-- `ResponsiveContainer` + `BarChart` từ `recharts`
-- Màu bar tính bằng hàm `barColor(entry)` nhận `{earned, submitted}`
-- Tooltip style theo `isDark` để khớp với theme
-- Axis color dùng biến `axisColor` tính từ `isDark`
-
-### Xuất Excel
-- Dùng `XLSX.utils.json_to_sheet()` + `XLSX.writeFile()`
-- Mỗi row = 1 ngày với đầy đủ 15 cột
-- File tên: `BetterMe_YYYY-MM-DD.xlsx`
-
-### Backup JSON
-- `URL.createObjectURL(new Blob(...))` + click ảo — không cần server
-- File tên: `BetterMe_backup_YYYY-MM-DD.json`
-
-### Notifications
-- State `notifPermission` sync với `Notification.permission`
-- `toggleNotif()`: nếu chưa có permission thì gọi `Notification.requestPermission()`
-- `useEffect` chạy `setInterval` mỗi 60 giây, check giờ === 21 && phút ≤ 2
-- Dùng `localStorage` key `notified_YYYY-MM-DD` để tránh nhắc nhiều lần trong ngày
-- iOS Safari không hỗ trợ Notification API — toggle sẽ không có tác dụng trên iPhone
-
-### PWA
-- `vite-plugin-pwa` trong `vite.config.js` với `registerType: 'autoUpdate'`
-- Manifest: name, short_name, display standalone, orientation portrait, icon SVG
-- Service worker Workbox tự cache các file JS/CSS/HTML/SVG
-- Để install được trên Android Chrome: cần thêm PNG icon 192×192 và 512×512 vào `public/` và manifest
-
----
-
-## 8. Cách deploy
-
-**Auto-deploy:** Mỗi lần push lên `main` branch, Vercel tự động build và deploy.
-
-**Manual deploy từ terminal:**
-```bash
-npx vercel --prod
+### Chốt sổ / Mở khóa
+```
+CHỐT SỔ → confirm modal → setIsSubmitted(true) → Firestore status: 'submitted'
+MỞ KHÓA → setShowConfirmModal(false) → setIsSubmitted(false) → Firestore status: 'draft'
+           (không hỏi gì, unlock ngay lập tức)
 ```
 
-**Build command:** `vite build`  
-**Output directory:** `dist`
+### Sync strategy
+- **Mỗi lần đổi task status**: sync ngay (optimistic update)
+- **Text fields** (journal, reflections, meals): sync khi `onBlur`
+- `onSnapshot` lắng nghe realtime → tự cập nhật nếu có thay đổi từ thiết bị khác
 
-> **Lưu ý Windows:** Nếu gặp lỗi "running scripts is disabled", chạy trước:  
+### Modal confirm submit
+- Click backdrop = đóng modal (không submit)
+- Chỉ submit khi bấm "Đồng ý"
+
+---
+
+## 9. Chi tiết kỹ thuật
+
+### Dark mode
+- `@custom-variant dark (&:where(.dark, .dark *))` trong `src/index.css`
+- Toggle class `.dark` trên `document.documentElement`
+- Chart colors, tooltip, axis color đều nhận `isDark` làm tham số
+
+### Streak (điểm)
+- `STREAK_MIN = 80` — sửa hằng số này để đổi ngưỡng
+- Logic: đi lùi từ hôm nay, bỏ qua hôm nay nếu chưa chốt, đếm liên tiếp đến khi gặp ngày không đạt
+
+### Streak (calo)
+- Ngưỡng: `netCalories <= CALORIE_BUDGET` (= 1668) và `status === 'submitted'`
+- Cùng logic đi lùi như streak điểm
+
+### Recharts scrollable chart
+- Không dùng `ResponsiveContainer`; dùng `BarChart width={data.length * 36}` fixed
+- Wrapper `div` có `overflow-x-auto`, `scrollbarWidth: 'none'`
+- `useEffect` auto-scroll về bên phải (ngày mới nhất) khi mở tab Stats
+- Dùng `useRef` cho cả 2 chart: `chartScrollRef` (điểm) và `calChartScrollRef` (calo)
+
+### Monthly average
+- Dùng `l.earnedPoints != null ? l.earnedPoints : calculateScore(l.tasks).earned` để tránh tính 0 cho ngày thiếu data
+- Trả `null` khi chưa có ngày nào → hiển thị "—"
+
+### Notifications
+- `setInterval` 60s, check `hours === 21 && minutes <= 2`
+- Key `notified_YYYY-MM-DD` trong localStorage tránh nhắc lặp
+- iOS Safari không hỗ trợ — toggle vô hiệu trên iPhone
+
+### PWA
+- `vite-plugin-pwa` + `registerType: 'autoUpdate'`
+- Để installable đầy đủ trên Android: cần thêm PNG icon 192×192 và 512×512
+
+---
+
+## 10. Cách deploy
+
+**Auto-deploy:** Push lên `main` → Vercel tự build và deploy.
+
+```bash
+npx vercel --prod   # manual deploy
+```
+
+**Build:** `vite build` → output `dist/`
+
+> **Windows:** Nếu gặp lỗi PowerShell scripts disabled:  
 > `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`
 
 ---
 
-## 9. TODO còn lại
+## 11. TODO còn lại
 
-- [ ] **PWA icon PNG** — thêm `public/icon-192.png` và `public/icon-512.png` vào manifest để installable đầy đủ trên Android
-- [ ] **Biểu đồ tháng** — mở rộng Stats tab: chart theo tháng thay vì chỉ 7 ngày
-- [ ] **Thống kê chi tiết** — ngày tốt nhất, category nào hay thấp điểm nhất
-- [ ] **iOS notification** — hiện Web Notification API không hỗ trợ iOS Safari
+- [ ] **PWA icon PNG** — thêm `public/icon-192.png` + `public/icon-512.png` vào manifest
+- [ ] **Thống kê nâng cao** — ngày tốt nhất, category hay bị thấp điểm, heatmap tháng
+- [ ] **iOS notification** — Web Notification API chưa hỗ trợ iOS Safari
+- [ ] **Custom budget calo** — hiện hardcode 1668, có thể cho user tự nhập
 
 ---
 
-## 10. Cách thêm task mới
+## 12. Cách thêm task mới
 
 Mở `src/App.jsx`, tìm `const baseTasks = [...]`, thêm object:
 
@@ -235,48 +294,44 @@ Mở `src/App.jsx`, tìm `const baseTasks = [...]`, thêm object:
 { id: 18, text: 'Nội dung câu hỏi', weight: 7, type: 'rating', category: 'Chăm sóc bản thân' }
 ```
 
-- `id`: số duy nhất, không trùng với id nào đang có
+- `id`: số duy nhất, không trùng id nào đang có (hiện tại max = 17)
 - `weight`: số bất kỳ — hệ thống tự chuẩn hóa về thang 100
 - `type`: `'binary'` hoặc `'rating'`
-- `category`: phải là một trong 4 giá trị trong `categoryOrder`
+- `category`: một trong 4 giá trị trong `categoryOrder`
 
 ---
 
-## 11. Cách build app tương tự từ đầu
+## 13. Cách build app tương tự từ đầu
 
 ```bash
 # 1. Khởi tạo
-npx create-vite@latest . --template react
-npm install
+npx create-vite@latest . --template react && npm install
 
-# 2. Cài thư viện
+# 2. Thư viện
 npm install firebase tailwindcss postcss autoprefixer @tailwindcss/postcss
 npm install xlsx recharts vite-plugin-pwa
 
-# 3. Tailwind v4 config
+# 3. Tailwind v4
 # postcss.config.js  → { '@tailwindcss/postcss': {}, autoprefixer: {} }
-# tailwind.config.js → content: ["./index.html", "./src/**/*.{js,jsx}"]
+# tailwind.config.js → { content: ["./index.html","./src/**/*.{js,jsx}"], darkMode: 'class' }
 # src/index.css      → @import "tailwindcss";
 #                      @config "../tailwind.config.js";
 #                      @custom-variant dark (&:where(.dark, .dark *));
 
-# 4. PWA — vite.config.js
+# 4. vite.config.js
 # import { VitePWA } from 'vite-plugin-pwa'
 # plugins: [react(), VitePWA({ registerType: 'autoUpdate', manifest: {...} })]
 
 # 5. Firebase
-# - Tạo project tại console.firebase.google.com
-# - Enable Firestore + Anonymous Auth
-# - Copy firebaseConfig vào App.jsx
+# console.firebase.google.com → Firestore + Anonymous Auth → copy firebaseConfig
 
 # 6. Deploy
 git init && git add . && git commit -m "init"
-git remote add origin <github-url>
-git push -u origin main
+git remote add origin <github-url> && git push -u origin main
 npx vercel --prod
 ```
 
-**Firestore Security Rules tối thiểu (cho anonymous auth):**
+**Firestore Security Rules:**
 ```
 rules_version = '2';
 service cloud.firestore {
@@ -290,14 +345,26 @@ service cloud.firestore {
 
 ---
 
-## 12. Môi trường phát triển
+## 14. Môi trường phát triển
 
 - OS: Windows 11 Enterprise
-- Node.js: v22.11.0
+- Node.js: v22.11.0 (note: Vite 8 yêu cầu ≥22.12 nhưng vẫn chạy được với 22.11)
 - npm: 10.9.0
-- Shell: PowerShell (cần `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser` để chạy npx)
-- Editor: VS Code (khuyên dùng extension Tailwind CSS IntelliSense)
+- Shell: PowerShell (cần set ExecutionPolicy trước khi dùng npx)
+- Editor: VS Code + Tailwind CSS IntelliSense extension
 
 ---
 
-*Cập nhật lần cuối: 2026-06-04 — Phiên bản 2: thêm dark mode, recharts, streak, notifications, PWA, Excel/JSON export.*
+## 15. Lịch sử phiên bản
+
+| Version | Ngày | Nội dung |
+|---|---|---|
+| v1 | 2026-06-04 | MVP: performance tracker + nutrition + diary + Firestore sync |
+| v2 | 2026-06-04 | Dark mode, Recharts, streak (60→80), notifications, PWA, Excel/JSON export |
+| v3 | 2026-06-05 | Chart 30 ngày scrollable, monthly avg fix, footer height fix, streak threshold 80 |
+| v4 | 2026-06-05 | Calorie tracker: burned, rượu mạnh 🥃, rượu vang 🍷, bia 500/330, NET vs budget 1668, calorie chart + streak trong Stats |
+| v5 | 2026-06-05 | Nutrition UX: bỏ text input giữ kcal 2-col, đổi icon rượu, streak calo màu đen, bar chart đậm/nhạt/trống |
+
+---
+
+*Cập nhật lần cuối: 2026-06-05 — v5 final.*
