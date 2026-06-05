@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, onSnapshot } from 'firebase/firestore';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, ReferenceLine } from 'recharts';
 import * as XLSX from 'xlsx';
 
 const firebaseConfig = {
@@ -19,6 +19,10 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const myUserId = "Admin_Tuan_123";
 const STREAK_MIN = 80;
+const CALORIE_BUDGET = 1668;
+const CAL_PER_ML_RUOU = 2.2;
+const CAL_PER_LON_500 = 230;
+const CAL_PER_LON_330 = 150;
 
 const baseTasks = [
   { id: 15, text: 'Bạn có tập luyện cardio?', weight: 8, type: 'rating', category: 'Chăm sóc bản thân' },
@@ -53,7 +57,11 @@ export default function App() {
     breakfastText: '', breakfastCal: '',
     lunchText: '', lunchCal: '',
     dinnerText: '', dinnerCal: '',
-    snackText: '', snackCal: ''
+    snackText: '', snackCal: '',
+    caloriesBurned: '',
+    ruouMl: '',
+    bia500Cans: '',
+    bia330Cans: ''
   });
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [history, setHistory] = useState([]);
@@ -120,14 +128,18 @@ export default function App() {
           breakfastText: d.meals?.breakfastText || '', breakfastCal: d.meals?.breakfastCal || '',
           lunchText: d.meals?.lunchText || '', lunchCal: d.meals?.lunchCal || '',
           dinnerText: d.meals?.dinnerText || '', dinnerCal: d.meals?.dinnerCal || '',
-          snackText: d.meals?.snackText || '', snackCal: d.meals?.snackCal || ''
+          snackText: d.meals?.snackText || '', snackCal: d.meals?.snackCal || '',
+          caloriesBurned: d.meals?.caloriesBurned || '',
+          ruouMl: d.meals?.ruouMl || '',
+          bia500Cans: d.meals?.bia500Cans || '',
+          bia330Cans: d.meals?.bia330Cans || ''
         });
         setReflections({ proud: d.reflections?.proud || '', better: d.reflections?.better || '', lesson: d.reflections?.lesson || '' });
         setIsSubmitted(d.status === 'submitted');
       } else {
         setTodayTasks(baseTasks.map(t => ({ id: t.id, status: 'pending', comment: '' })));
         setDailyJournal('');
-        setMeals({ breakfastText: '', breakfastCal: '', lunchText: '', lunchCal: '', dinnerText: '', dinnerCal: '', snackText: '', snackCal: '' });
+        setMeals({ breakfastText: '', breakfastCal: '', lunchText: '', lunchCal: '', dinnerText: '', dinnerCal: '', snackText: '', snackCal: '', caloriesBurned: '', ruouMl: '', bia500Cans: '', bia330Cans: '' });
         setReflections({ proud: '', better: '', lesson: '' });
         setIsSubmitted(false);
       }
@@ -232,23 +244,74 @@ export default function App() {
 
   // ── Refs ─────────────────────────────────────────────────────────────────
   const chartScrollRef = useRef(null);
+  const calChartScrollRef = useRef(null);
 
   useEffect(() => {
     if (activeTab === 'stats') {
       setTimeout(() => {
-        if (chartScrollRef.current)
-          chartScrollRef.current.scrollLeft = chartScrollRef.current.scrollWidth;
+        if (chartScrollRef.current)    chartScrollRef.current.scrollLeft    = chartScrollRef.current.scrollWidth;
+        if (calChartScrollRef.current) calChartScrollRef.current.scrollLeft = calChartScrollRef.current.scrollWidth;
       }, 80);
     }
   }, [activeTab, history]);
 
+  // ── Calorie helpers ──────────────────────────────────────────────────────
+  const getCalorieStreak = () => {
+    let streak = 0;
+    const today = new Date();
+    for (let i = 0; i < 365; i++) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const log = history.find(h => h.date === getDateStr(d));
+      const good = log?.status === 'submitted' && log.netCalories != null && log.netCalories <= CALORIE_BUDGET;
+      if (i === 0 && !good) continue;
+      if (!good) break;
+      streak++;
+    }
+    return streak;
+  };
+
+  const getWeeklyCal = () => {
+    const today = new Date();
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      return history.find(h => h.date === getDateStr(d));
+    }).filter(l => l?.status === 'submitted' && l.netCalories != null)
+      .reduce((s, l) => s + l.netCalories, 0);
+  };
+
+  const getCalorieChartData = () => {
+    const today = new Date();
+    return Array.from({ length: 30 }, (_, i) => {
+      const d = new Date(today);
+      d.setDate(today.getDate() - (29 - i));
+      const dateStr = getDateStr(d);
+      const log = history.find(h => h.date === dateStr);
+      return {
+        day: `${d.getDate()}/${d.getMonth() + 1}`,
+        net: log?.status === 'submitted' && log.netCalories != null ? log.netCalories : null,
+        budget: CALORIE_BUDGET
+      };
+    });
+  };
+
   // ── Derived values ──────────────────────────────────────────────────────
   const score = calculateScore(todayTasks);
-  const totalCal = [meals.breakfastCal, meals.lunchCal, meals.dinnerCal, meals.snackCal]
-    .reduce((s, v) => s + Number(v || 0), 0);
+  const foodCal = ['breakfastCal','lunchCal','dinnerCal','snackCal'].reduce((s, k) => s + Number(meals[k] || 0), 0);
+  const ruouCal  = Math.round(Number(meals.ruouMl    || 0) * CAL_PER_ML_RUOU);
+  const bia500Cal = Number(meals.bia500Cans || 0) * CAL_PER_LON_500;
+  const bia330Cal = Number(meals.bia330Cans || 0) * CAL_PER_LON_330;
+  const totalIntakeCal = foodCal + ruouCal + bia500Cal + bia330Cal;
+  const burnedCal = Number(meals.caloriesBurned || 0);
+  const netCal = totalIntakeCal - burnedCal;
+  const calDiff = netCal - CALORIE_BUDGET;
   const streak = getStreak();
   const monthlyAvg = getMonthlyAvg();
   const chartData = getChartData();
+  const calChartData = getCalorieChartData();
+  const calStreak = getCalorieStreak();
+  const weeklyCal = getWeeklyCal();
 
   const barColor = (entry) => {
     if (!entry.submitted) return isDark ? '#374151' : '#e5e7eb';
@@ -263,9 +326,16 @@ export default function App() {
     setSyncStatus('Đang lưu...');
     try {
       const s = calculateScore(tasks);
+      const foodCal = ['breakfastCal','lunchCal','dinnerCal','snackCal'].reduce((a, k) => a + Number(mls[k] || 0), 0);
+      const netCal = foodCal
+        + Math.round(Number(mls.ruouMl || 0) * CAL_PER_ML_RUOU)
+        + Number(mls.bia500Cans || 0) * CAL_PER_LON_500
+        + Number(mls.bia330Cans || 0) * CAL_PER_LON_330
+        - Number(mls.caloriesBurned || 0);
       await setDoc(doc(db, 'users', myUserId, 'daily_logs', selectedDateStr), {
         date: selectedDateStr, tasks, dailyJournal: journal, meals: mls, reflections: refs,
-        percent: s.percent, totalPoints: s.total, earnedPoints: s.earned, status
+        percent: s.percent, totalPoints: s.total, earnedPoints: s.earned,
+        netCalories: netCal, status
       }, { merge: true });
       setTimeout(() => setSyncStatus('Đã lưu Cloud ✓'), 500);
     } catch { setSyncStatus('Lỗi mạng!'); }
@@ -285,6 +355,8 @@ export default function App() {
       'Bữa trưa': l.meals?.lunchText || '', 'Cal trưa': l.meals?.lunchCal || '',
       'Bữa tối': l.meals?.dinnerText || '', 'Cal tối': l.meals?.dinnerCal || '',
       'Ăn vặt': l.meals?.snackText || '', 'Cal vặt': l.meals?.snackCal || '',
+      'Rượu (ml)': l.meals?.ruouMl || '', 'Bia 500ml (lon)': l.meals?.bia500Cans || '', 'Bia 330ml (lon)': l.meals?.bia330Cans || '',
+      'Calo đã đốt': l.meals?.caloriesBurned || '', 'Calo NET': l.netCalories ?? '',
     }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Better Me 2026');
@@ -523,16 +595,14 @@ export default function App() {
           {/* ── TAB: NUTRITION ─────────────────────────────────────────── */}
           {activeTab === 'nutrition' && (
             <div className="space-y-4">
-              <div className="flex items-center mb-2">
-                <div className={`flex-1 ${divider}`} />
-                <span className="px-3 text-[11px] font-bold text-gray-400 uppercase tracking-widest">Nhật ký ăn uống</span>
-                <div className={`flex-1 ${divider}`} />
-              </div>
+
+              {/* Bữa ăn */}
+              <div className="flex items-center"><div className={`flex-1 ${divider}`} /><span className="px-3 text-[11px] font-bold text-gray-400 uppercase tracking-widest">Bữa ăn</span><div className={`flex-1 ${divider}`} /></div>
               {[
                 { ft: 'breakfastText', fc: 'breakfastCal', label: '🍳 Bữa Sáng' },
-                { ft: 'lunchText', fc: 'lunchCal', label: '🍱 Bữa Trưa' },
-                { ft: 'dinnerText', fc: 'dinnerCal', label: '🍲 Bữa Tối' },
-                { ft: 'snackText', fc: 'snackCal', label: '🍎 Ăn vặt / Khác' }
+                { ft: 'lunchText',     fc: 'lunchCal',     label: '🍱 Bữa Trưa' },
+                { ft: 'dinnerText',    fc: 'dinnerCal',     label: '🍲 Bữa Tối'  },
+                { ft: 'snackText',     fc: 'snackCal',      label: '🍎 Ăn vặt'   }
               ].map(item => (
                 <div key={item.label} className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700 flex flex-col gap-2">
                   <span className="text-xs font-bold text-gray-500 dark:text-gray-400">{item.label}</span>
@@ -548,10 +618,93 @@ export default function App() {
                   </div>
                 </div>
               ))}
-              <div className="flex justify-between items-center px-4 py-4 bg-orange-50 dark:bg-orange-900/20 rounded-xl border border-orange-100 dark:border-orange-900/40">
-                <span className="text-[13px] font-bold text-orange-700 dark:text-orange-400">🔥 Tổng Calo nạp vào:</span>
-                <span className="text-xl font-black text-orange-600 dark:text-orange-400">{totalCal} <span className="text-xs font-medium">kcal</span></span>
+
+              {/* Thể dục */}
+              <div className="flex items-center mt-2"><div className={`flex-1 ${divider}`} /><span className="px-3 text-[11px] font-bold text-gray-400 uppercase tracking-widest">Vận động</span><div className={`flex-1 ${divider}`} /></div>
+              <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-xl border border-green-100 dark:border-green-900/40 flex items-center gap-3">
+                <span className="text-xl">🏋️</span>
+                <div className="flex-1">
+                  <p className="text-xs font-bold text-green-700 dark:text-green-400 mb-1">Calo đã đốt (tập luyện)</p>
+                  <input type="number" placeholder="0" value={meals.caloriesBurned}
+                    onChange={e => !isSubmitted && setMeals(p => ({ ...p, caloriesBurned: e.target.value }))}
+                    onBlur={handleBlur} readOnly={isSubmitted}
+                    className="w-full bg-white dark:bg-gray-700 border border-green-200 dark:border-green-800 rounded-lg px-3 py-2 text-sm font-bold outline-none text-gray-700 dark:text-gray-200 focus:border-green-400" />
+                </div>
+                <span className="text-xs text-green-600 dark:text-green-400 font-bold whitespace-nowrap">kcal đốt</span>
               </div>
+
+              {/* Rượu & Bia */}
+              <div className="flex items-center mt-2"><div className={`flex-1 ${divider}`} /><span className="px-3 text-[11px] font-bold text-gray-400 uppercase tracking-widest">Rượu / Bia</span><div className={`flex-1 ${divider}`} /></div>
+
+              {/* Rượu */}
+              <div className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded-xl border border-purple-100 dark:border-purple-900/40">
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">🍷</span>
+                  <div className="flex-1">
+                    <p className="text-xs font-bold text-purple-700 dark:text-purple-400 mb-1">Rượu <span className="font-normal text-gray-400">(1 ml ≈ {CAL_PER_ML_RUOU} kcal)</span></p>
+                    <div className="flex gap-2 items-center">
+                      <input type="number" placeholder="0" value={meals.ruouMl}
+                        onChange={e => !isSubmitted && setMeals(p => ({ ...p, ruouMl: e.target.value }))}
+                        onBlur={handleBlur} readOnly={isSubmitted}
+                        className="w-24 bg-white dark:bg-gray-700 border border-purple-200 dark:border-purple-800 rounded-lg px-3 py-2 text-sm font-bold outline-none text-gray-700 dark:text-gray-200 focus:border-purple-400" />
+                      <span className="text-xs text-gray-500">ml</span>
+                      {ruouCal > 0 && <span className="ml-auto text-xs font-bold text-purple-600 dark:text-purple-400">≈ {ruouCal} kcal</span>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bia */}
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded-xl border border-yellow-100 dark:border-yellow-900/40 space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">🍺</span>
+                  <span className="text-xs font-bold text-yellow-700 dark:text-yellow-400">Bia</span>
+                </div>
+                {[
+                  { field: 'bia500Cans', label: 'Lon 500ml', hint: `1 lon ≈ ${CAL_PER_LON_500} kcal`, cal: bia500Cal },
+                  { field: 'bia330Cans', label: 'Lon 330ml', hint: `1 lon ≈ ${CAL_PER_LON_330} kcal`, cal: bia330Cal }
+                ].map(item => (
+                  <div key={item.field} className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1">{item.label} <span className="text-gray-400">({item.hint})</span></p>
+                      <div className="flex gap-2 items-center">
+                        <input type="number" placeholder="0" value={meals[item.field]}
+                          onChange={e => !isSubmitted && setMeals(p => ({ ...p, [item.field]: e.target.value }))}
+                          onBlur={handleBlur} readOnly={isSubmitted}
+                          className="w-20 bg-white dark:bg-gray-700 border border-yellow-200 dark:border-yellow-800 rounded-lg px-3 py-2 text-sm font-bold outline-none text-gray-700 dark:text-gray-200 focus:border-yellow-400" />
+                        <span className="text-xs text-gray-500">lon</span>
+                        {item.cal > 0 && <span className="ml-auto text-xs font-bold text-yellow-600 dark:text-yellow-400">≈ {item.cal} kcal</span>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Tổng kết calo */}
+              <div className="bg-gray-900 dark:bg-black text-white rounded-2xl p-4 space-y-2 mt-2">
+                <p className="text-[10px] uppercase tracking-widest text-gray-400 font-bold mb-3">Tổng kết hôm nay</p>
+                <div className="flex justify-between text-sm"><span className="text-gray-300">🍽 Thức ăn</span><span className="font-bold">{foodCal} kcal</span></div>
+                {ruouCal > 0  && <div className="flex justify-between text-sm"><span className="text-gray-300">🍷 Rượu</span><span className="font-bold">+{ruouCal} kcal</span></div>}
+                {bia500Cal > 0 && <div className="flex justify-between text-sm"><span className="text-gray-300">🍺 Bia 500ml</span><span className="font-bold">+{bia500Cal} kcal</span></div>}
+                {bia330Cal > 0 && <div className="flex justify-between text-sm"><span className="text-gray-300">🍺 Bia 330ml</span><span className="font-bold">+{bia330Cal} kcal</span></div>}
+                {burnedCal > 0 && <div className="flex justify-between text-sm"><span className="text-green-400">🏋️ Đã đốt</span><span className="font-bold text-green-400">−{burnedCal} kcal</span></div>}
+                <div className={`flex-1 border-t border-gray-700 my-1`} />
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-bold text-white">NET</span>
+                  <span className={`text-2xl font-black ${netCal <= CALORIE_BUDGET ? 'text-green-400' : 'text-red-400'}`}>{netCal}</span>
+                </div>
+                <div className="flex justify-between text-xs text-gray-400">
+                  <span>Budget: {CALORIE_BUDGET} kcal</span>
+                  <span className={calDiff <= 0 ? 'text-green-400' : 'text-red-400'}>
+                    {calDiff <= 0 ? `✓ còn ${Math.abs(calDiff)} kcal` : `⚠ vượt ${calDiff} kcal`}
+                  </span>
+                </div>
+                <div className="w-full bg-gray-700 rounded-full h-1.5 overflow-hidden mt-1">
+                  <div className={`h-full rounded-full transition-all duration-700 ${netCal <= CALORIE_BUDGET ? 'bg-green-400' : 'bg-red-400'}`}
+                    style={{ width: `${Math.min((netCal / CALORIE_BUDGET) * 100, 100)}%` }} />
+                </div>
+              </div>
+
             </div>
           )}
 
@@ -628,6 +781,69 @@ export default function App() {
                     { color: isDark ? 'bg-white' : 'bg-black', label: `≥ 80 (streak)` },
                     { color: 'bg-gray-400', label: '≥ 60' },
                     { color: isDark ? 'bg-gray-600' : 'bg-gray-200', label: 'Chưa đạt' }
+                  ].map(l => (
+                    <div key={l.label} className="flex items-center gap-1.5">
+                      <div className={`w-2.5 h-2.5 rounded-sm ${l.color}`} />
+                      <span className="text-[10px] text-gray-400">{l.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── CALORIE STATS ────────────────────────────────────────── */}
+              <div className="flex items-center pt-2"><div className={`flex-1 ${divider}`} /><span className="px-3 text-[11px] font-bold text-gray-400 uppercase tracking-widest">Calo</span><div className={`flex-1 ${divider}`} /></div>
+
+              {/* Calorie streak + weekly */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-green-600 text-white p-4 rounded-2xl">
+                  <p className="text-[9px] text-green-200 uppercase tracking-widest font-bold mb-1">Streak calo 🥗</p>
+                  <div className="flex items-end gap-1.5">
+                    <span className="text-3xl font-black">{calStreak}</span>
+                    <span className="text-green-200 text-xs pb-0.5">ngày ≤{CALORIE_BUDGET}</span>
+                  </div>
+                </div>
+                <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700">
+                  <p className="text-[9px] text-gray-400 uppercase tracking-widest font-bold mb-1">Tuần này 📅</p>
+                  <div className="flex items-end gap-1">
+                    <span className={`text-2xl font-black ${weeklyCal <= CALORIE_BUDGET * 7 ? 'text-green-600 dark:text-green-400' : 'text-red-500'}`}>{weeklyCal.toLocaleString()}</span>
+                  </div>
+                  <p className="text-[9px] text-gray-400 mt-0.5">budget: {(CALORIE_BUDGET * 7).toLocaleString()} kcal</p>
+                </div>
+              </div>
+
+              {/* Calorie chart 30 days */}
+              <div className={`${card} p-4 shadow-sm`}>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm">Calo net 30 ngày</h3>
+                  <span className="text-[10px] text-gray-400 italic">← vuốt</span>
+                </div>
+                <div ref={calChartScrollRef} className="overflow-x-auto -mx-4 px-2" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                  <BarChart width={calChartData.length * 36} height={175} data={calChartData} margin={{ top: 18, right: 8, left: -10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#f3f4f6'} vertical={false} />
+                    <XAxis dataKey="day" tick={{ fontSize: 9, fill: axisColor }} axisLine={false} tickLine={false} interval={0} />
+                    <YAxis tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
+                    <ReferenceLine y={CALORIE_BUDGET} stroke={isDark ? '#facc15' : '#f59e0b'} strokeDasharray="4 3" strokeWidth={1.5} label={{ value: `${CALORIE_BUDGET}`, fill: isDark ? '#facc15' : '#d97706', fontSize: 9, position: 'insideTopRight' }} />
+                    <Tooltip
+                      cursor={{ fill: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)' }}
+                      contentStyle={{ backgroundColor: isDark ? '#1f2937' : '#fff', border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: 8, color: isDark ? '#f9fafb' : '#111', fontSize: 12 }}
+                      formatter={v => v != null ? [`${v} kcal`, 'Net'] : ['—', 'Chưa có']}
+                    />
+                    <Bar dataKey="net" radius={[3, 3, 0, 0]} maxBarSize={28}>
+                      {calChartData.map((entry, i) => (
+                        <Cell key={i} fill={
+                          entry.net == null ? (isDark ? '#374151' : '#e5e7eb')
+                          : entry.net <= CALORIE_BUDGET ? '#22c55e'
+                          : '#ef4444'
+                        } />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </div>
+                <div className="flex gap-4 mt-3 justify-center">
+                  {[
+                    { color: 'bg-green-500', label: `≤ ${CALORIE_BUDGET} kcal` },
+                    { color: 'bg-red-400',   label: `> ${CALORIE_BUDGET} kcal` },
+                    { color: isDark ? 'bg-gray-600' : 'bg-gray-200', label: 'Chưa chốt' }
                   ].map(l => (
                     <div key={l.label} className="flex items-center gap-1.5">
                       <div className={`w-2.5 h-2.5 rounded-sm ${l.color}`} />
