@@ -20,9 +20,10 @@ const db = getFirestore(app);
 const myUserId = "Admin_Tuan_123";
 const STREAK_MIN = 80;
 const CALORIE_BUDGET = 1668;
-const CAL_PER_ML_RUOU = 2.2;
-const CAL_PER_LON_500 = 230;
-const CAL_PER_LON_330 = 150;
+const CAL_PER_ML_RUOU      = 2.2;
+const CAL_PER_ML_RUOU_VANG = 0.85;
+const CAL_PER_LON_500      = 230;
+const CAL_PER_LON_330      = 150;
 
 const baseTasks = [
   { id: 15, text: 'Bạn có tập luyện cardio?', weight: 8, type: 'rating', category: 'Chăm sóc bản thân' },
@@ -60,6 +61,7 @@ export default function App() {
     snackText: '', snackCal: '',
     caloriesBurned: '',
     ruouMl: '',
+    ruouVangMl: '',
     bia500Cans: '',
     bia330Cans: ''
   });
@@ -131,6 +133,7 @@ export default function App() {
           snackText: d.meals?.snackText || '', snackCal: d.meals?.snackCal || '',
           caloriesBurned: d.meals?.caloriesBurned || '',
           ruouMl: d.meals?.ruouMl || '',
+          ruouVangMl: d.meals?.ruouVangMl || '',
           bia500Cans: d.meals?.bia500Cans || '',
           bia330Cans: d.meals?.bia330Cans || ''
         });
@@ -139,7 +142,7 @@ export default function App() {
       } else {
         setTodayTasks(baseTasks.map(t => ({ id: t.id, status: 'pending', comment: '' })));
         setDailyJournal('');
-        setMeals({ breakfastText: '', breakfastCal: '', lunchText: '', lunchCal: '', dinnerText: '', dinnerCal: '', snackText: '', snackCal: '', caloriesBurned: '', ruouMl: '', bia500Cans: '', bia330Cans: '' });
+        setMeals({ breakfastText: '', breakfastCal: '', lunchText: '', lunchCal: '', dinnerText: '', dinnerCal: '', snackText: '', snackCal: '', caloriesBurned: '', ruouMl: '', ruouVangMl: '', bia500Cans: '', bia330Cans: '' });
         setReflections({ proud: '', better: '', lesson: '' });
         setIsSubmitted(false);
       }
@@ -299,10 +302,11 @@ export default function App() {
   // ── Derived values ──────────────────────────────────────────────────────
   const score = calculateScore(todayTasks);
   const foodCal = ['breakfastCal','lunchCal','dinnerCal','snackCal'].reduce((s, k) => s + Number(meals[k] || 0), 0);
-  const ruouCal  = Math.round(Number(meals.ruouMl    || 0) * CAL_PER_ML_RUOU);
-  const bia500Cal = Number(meals.bia500Cans || 0) * CAL_PER_LON_500;
-  const bia330Cal = Number(meals.bia330Cans || 0) * CAL_PER_LON_330;
-  const totalIntakeCal = foodCal + ruouCal + bia500Cal + bia330Cal;
+  const ruouCal     = Math.round(Number(meals.ruouMl     || 0) * CAL_PER_ML_RUOU);
+  const ruouVangCal = Math.round(Number(meals.ruouVangMl || 0) * CAL_PER_ML_RUOU_VANG);
+  const bia500Cal   = Number(meals.bia500Cans || 0) * CAL_PER_LON_500;
+  const bia330Cal   = Number(meals.bia330Cans || 0) * CAL_PER_LON_330;
+  const totalIntakeCal = foodCal + ruouCal + ruouVangCal + bia500Cal + bia330Cal;
   const burnedCal = Number(meals.caloriesBurned || 0);
   const netCal = totalIntakeCal - burnedCal;
   const calDiff = netCal - CALORIE_BUDGET;
@@ -328,7 +332,8 @@ export default function App() {
       const s = calculateScore(tasks);
       const foodCal = ['breakfastCal','lunchCal','dinnerCal','snackCal'].reduce((a, k) => a + Number(mls[k] || 0), 0);
       const netCal = foodCal
-        + Math.round(Number(mls.ruouMl || 0) * CAL_PER_ML_RUOU)
+        + Math.round(Number(mls.ruouMl     || 0) * CAL_PER_ML_RUOU)
+        + Math.round(Number(mls.ruouVangMl || 0) * CAL_PER_ML_RUOU_VANG)
         + Number(mls.bia500Cans || 0) * CAL_PER_LON_500
         + Number(mls.bia330Cans || 0) * CAL_PER_LON_330
         - Number(mls.caloriesBurned || 0);
@@ -355,7 +360,7 @@ export default function App() {
       'Bữa trưa': l.meals?.lunchText || '', 'Cal trưa': l.meals?.lunchCal || '',
       'Bữa tối': l.meals?.dinnerText || '', 'Cal tối': l.meals?.dinnerCal || '',
       'Ăn vặt': l.meals?.snackText || '', 'Cal vặt': l.meals?.snackCal || '',
-      'Rượu (ml)': l.meals?.ruouMl || '', 'Bia 500ml (lon)': l.meals?.bia500Cans || '', 'Bia 330ml (lon)': l.meals?.bia330Cans || '',
+      'Rượu mạnh (ml)': l.meals?.ruouMl || '', 'Rượu vang (ml)': l.meals?.ruouVangMl || '', 'Bia 500ml (lon)': l.meals?.bia500Cans || '', 'Bia 330ml (lon)': l.meals?.bia330Cans || '',
       'Calo đã đốt': l.meals?.caloriesBurned || '', 'Calo NET': l.netCalories ?? '',
     }));
     const wb = XLSX.utils.book_new();
@@ -596,99 +601,110 @@ export default function App() {
           {activeTab === 'nutrition' && (
             <div className="space-y-4">
 
-              {/* Bữa ăn */}
+              {/* Bữa ăn — chỉ nhập kcal */}
               <div className="flex items-center"><div className={`flex-1 ${divider}`} /><span className="px-3 text-[11px] font-bold text-gray-400 uppercase tracking-widest">Bữa ăn</span><div className={`flex-1 ${divider}`} /></div>
-              {[
-                { ft: 'breakfastText', fc: 'breakfastCal', label: '🍳 Bữa Sáng' },
-                { ft: 'lunchText',     fc: 'lunchCal',     label: '🍱 Bữa Trưa' },
-                { ft: 'dinnerText',    fc: 'dinnerCal',     label: '🍲 Bữa Tối'  },
-                { ft: 'snackText',     fc: 'snackCal',      label: '🍎 Ăn vặt'   }
-              ].map(item => (
-                <div key={item.label} className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700 flex flex-col gap-2">
-                  <span className="text-xs font-bold text-gray-500 dark:text-gray-400">{item.label}</span>
-                  <div className="flex gap-2">
-                    <input type="text" placeholder="Ăn gì..." value={meals[item.ft]}
-                      onChange={e => !isSubmitted && setMeals(p => ({ ...p, [item.ft]: e.target.value }))}
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { fc: 'breakfastCal', label: '🍳 Bữa Sáng' },
+                  { fc: 'lunchCal',     label: '🍱 Bữa Trưa' },
+                  { fc: 'dinnerCal',    label: '🍲 Bữa Tối'  },
+                  { fc: 'snackCal',     label: '🍎 Ăn vặt'   }
+                ].map(item => (
+                  <div key={item.label} className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700">
+                    <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-2">{item.label}</p>
+                    <div className="flex items-center gap-1.5">
+                      <input type="number" placeholder="0" value={meals[item.fc]}
+                        onChange={e => !isSubmitted && setMeals(p => ({ ...p, [item.fc]: e.target.value }))}
+                        onBlur={handleBlur} readOnly={isSubmitted}
+                        className="flex-1 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2.5 text-sm font-bold text-center outline-none text-gray-700 dark:text-gray-200 placeholder:text-gray-300 dark:placeholder:text-gray-500 focus:border-gray-400 dark:focus:border-gray-500" />
+                      <span className="text-xs text-gray-400 font-medium">kcal</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Vận động */}
+              <div className="flex items-center mt-1"><div className={`flex-1 ${divider}`} /><span className="px-3 text-[11px] font-bold text-gray-400 uppercase tracking-widest">Vận động</span><div className={`flex-1 ${divider}`} /></div>
+              <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-xl border border-green-100 dark:border-green-900/40 flex items-center gap-3">
+                <span className="text-2xl">🏋️</span>
+                <div className="flex-1">
+                  <p className="text-xs font-bold text-green-700 dark:text-green-400 mb-2">Calo đã đốt</p>
+                  <div className="flex items-center gap-1.5">
+                    <input type="number" placeholder="0" value={meals.caloriesBurned}
+                      onChange={e => !isSubmitted && setMeals(p => ({ ...p, caloriesBurned: e.target.value }))}
                       onBlur={handleBlur} readOnly={isSubmitted}
-                      className="flex-1 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2.5 text-sm outline-none text-gray-700 dark:text-gray-200 placeholder:text-gray-300 dark:placeholder:text-gray-500 focus:border-gray-400 dark:focus:border-gray-500" />
-                    <input type="number" placeholder="Kcal" value={meals[item.fc]}
-                      onChange={e => !isSubmitted && setMeals(p => ({ ...p, [item.fc]: e.target.value }))}
-                      onBlur={handleBlur} readOnly={isSubmitted}
-                      className="w-20 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-2.5 text-sm text-center font-bold outline-none text-gray-700 dark:text-gray-200 placeholder:text-gray-300 dark:placeholder:text-gray-500 focus:border-gray-400 dark:focus:border-gray-500" />
+                      className="flex-1 bg-white dark:bg-gray-700 border border-green-200 dark:border-green-800 rounded-lg px-3 py-2.5 text-sm font-bold text-center outline-none text-gray-700 dark:text-gray-200 focus:border-green-400" />
+                    <span className="text-xs text-green-600 dark:text-green-400 font-bold">kcal đốt</span>
                   </div>
                 </div>
-              ))}
-
-              {/* Thể dục */}
-              <div className="flex items-center mt-2"><div className={`flex-1 ${divider}`} /><span className="px-3 text-[11px] font-bold text-gray-400 uppercase tracking-widest">Vận động</span><div className={`flex-1 ${divider}`} /></div>
-              <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-xl border border-green-100 dark:border-green-900/40 flex items-center gap-3">
-                <span className="text-xl">🏋️</span>
-                <div className="flex-1">
-                  <p className="text-xs font-bold text-green-700 dark:text-green-400 mb-1">Calo đã đốt (tập luyện)</p>
-                  <input type="number" placeholder="0" value={meals.caloriesBurned}
-                    onChange={e => !isSubmitted && setMeals(p => ({ ...p, caloriesBurned: e.target.value }))}
-                    onBlur={handleBlur} readOnly={isSubmitted}
-                    className="w-full bg-white dark:bg-gray-700 border border-green-200 dark:border-green-800 rounded-lg px-3 py-2 text-sm font-bold outline-none text-gray-700 dark:text-gray-200 focus:border-green-400" />
-                </div>
-                <span className="text-xs text-green-600 dark:text-green-400 font-bold whitespace-nowrap">kcal đốt</span>
               </div>
 
               {/* Rượu & Bia */}
-              <div className="flex items-center mt-2"><div className={`flex-1 ${divider}`} /><span className="px-3 text-[11px] font-bold text-gray-400 uppercase tracking-widest">Rượu / Bia</span><div className={`flex-1 ${divider}`} /></div>
+              <div className="flex items-center mt-1"><div className={`flex-1 ${divider}`} /><span className="px-3 text-[11px] font-bold text-gray-400 uppercase tracking-widest">Rượu / Bia</span><div className={`flex-1 ${divider}`} /></div>
 
-              {/* Rượu */}
-              <div className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded-xl border border-purple-100 dark:border-purple-900/40">
-                <div className="flex items-center gap-3">
-                  <span className="text-xl">🍷</span>
-                  <div className="flex-1">
-                    <p className="text-xs font-bold text-purple-700 dark:text-purple-400 mb-1">Rượu <span className="font-normal text-gray-400">(1 ml ≈ {CAL_PER_ML_RUOU} kcal)</span></p>
-                    <div className="flex gap-2 items-center">
-                      <input type="number" placeholder="0" value={meals.ruouMl}
-                        onChange={e => !isSubmitted && setMeals(p => ({ ...p, ruouMl: e.target.value }))}
-                        onBlur={handleBlur} readOnly={isSubmitted}
-                        className="w-24 bg-white dark:bg-gray-700 border border-purple-200 dark:border-purple-800 rounded-lg px-3 py-2 text-sm font-bold outline-none text-gray-700 dark:text-gray-200 focus:border-purple-400" />
-                      <span className="text-xs text-gray-500">ml</span>
-                      {ruouCal > 0 && <span className="ml-auto text-xs font-bold text-purple-600 dark:text-purple-400">≈ {ruouCal} kcal</span>}
-                    </div>
+              {/* Rượu mạnh */}
+              <div className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded-xl border border-purple-100 dark:border-purple-900/40 flex items-center gap-3">
+                <span className="text-2xl">🥃</span>
+                <div className="flex-1">
+                  <p className="text-xs font-bold text-purple-700 dark:text-purple-400 mb-1">Rượu mạnh <span className="font-normal text-gray-400">(1ml ≈ {CAL_PER_ML_RUOU} kcal)</span></p>
+                  <div className="flex items-center gap-1.5">
+                    <input type="number" placeholder="0" value={meals.ruouMl}
+                      onChange={e => !isSubmitted && setMeals(p => ({ ...p, ruouMl: e.target.value }))}
+                      onBlur={handleBlur} readOnly={isSubmitted}
+                      className="flex-1 bg-white dark:bg-gray-700 border border-purple-200 dark:border-purple-800 rounded-lg px-3 py-2.5 text-sm font-bold text-center outline-none text-gray-700 dark:text-gray-200 focus:border-purple-400" />
+                    <span className="text-xs text-gray-500">ml</span>
+                    {ruouCal > 0 && <span className="text-xs font-bold text-purple-600 dark:text-purple-400 whitespace-nowrap">≈ {ruouCal} kcal</span>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Rượu vang */}
+              <div className="bg-rose-50 dark:bg-rose-900/20 p-3 rounded-xl border border-rose-100 dark:border-rose-900/40 flex items-center gap-3">
+                <span className="text-2xl">🍷</span>
+                <div className="flex-1">
+                  <p className="text-xs font-bold text-rose-700 dark:text-rose-400 mb-1">Rượu vang <span className="font-normal text-gray-400">(1ml ≈ {CAL_PER_ML_RUOU_VANG} kcal)</span></p>
+                  <div className="flex items-center gap-1.5">
+                    <input type="number" placeholder="0" value={meals.ruouVangMl}
+                      onChange={e => !isSubmitted && setMeals(p => ({ ...p, ruouVangMl: e.target.value }))}
+                      onBlur={handleBlur} readOnly={isSubmitted}
+                      className="flex-1 bg-white dark:bg-gray-700 border border-rose-200 dark:border-rose-800 rounded-lg px-3 py-2.5 text-sm font-bold text-center outline-none text-gray-700 dark:text-gray-200 focus:border-rose-400" />
+                    <span className="text-xs text-gray-500">ml</span>
+                    {ruouVangCal > 0 && <span className="text-xs font-bold text-rose-600 dark:text-rose-400 whitespace-nowrap">≈ {ruouVangCal} kcal</span>}
                   </div>
                 </div>
               </div>
 
               {/* Bia */}
               <div className="bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded-xl border border-yellow-100 dark:border-yellow-900/40 space-y-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-xl">🍺</span>
-                  <span className="text-xs font-bold text-yellow-700 dark:text-yellow-400">Bia</span>
-                </div>
+                <p className="text-xs font-bold text-yellow-700 dark:text-yellow-400">🍺 Bia</p>
                 {[
                   { field: 'bia500Cans', label: 'Lon 500ml', hint: `1 lon ≈ ${CAL_PER_LON_500} kcal`, cal: bia500Cal },
                   { field: 'bia330Cans', label: 'Lon 330ml', hint: `1 lon ≈ ${CAL_PER_LON_330} kcal`, cal: bia330Cal }
                 ].map(item => (
-                  <div key={item.field} className="flex items-center gap-2">
-                    <div className="flex-1">
-                      <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1">{item.label} <span className="text-gray-400">({item.hint})</span></p>
-                      <div className="flex gap-2 items-center">
-                        <input type="number" placeholder="0" value={meals[item.field]}
-                          onChange={e => !isSubmitted && setMeals(p => ({ ...p, [item.field]: e.target.value }))}
-                          onBlur={handleBlur} readOnly={isSubmitted}
-                          className="w-20 bg-white dark:bg-gray-700 border border-yellow-200 dark:border-yellow-800 rounded-lg px-3 py-2 text-sm font-bold outline-none text-gray-700 dark:text-gray-200 focus:border-yellow-400" />
-                        <span className="text-xs text-gray-500">lon</span>
-                        {item.cal > 0 && <span className="ml-auto text-xs font-bold text-yellow-600 dark:text-yellow-400">≈ {item.cal} kcal</span>}
-                      </div>
+                  <div key={item.field}>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1.5">{item.label} <span className="text-gray-400">({item.hint})</span></p>
+                    <div className="flex items-center gap-1.5">
+                      <input type="number" placeholder="0" value={meals[item.field]}
+                        onChange={e => !isSubmitted && setMeals(p => ({ ...p, [item.field]: e.target.value }))}
+                        onBlur={handleBlur} readOnly={isSubmitted}
+                        className="flex-1 bg-white dark:bg-gray-700 border border-yellow-200 dark:border-yellow-800 rounded-lg px-3 py-2.5 text-sm font-bold text-center outline-none text-gray-700 dark:text-gray-200 focus:border-yellow-400" />
+                      <span className="text-xs text-gray-500">lon</span>
+                      {item.cal > 0 && <span className="text-xs font-bold text-yellow-600 dark:text-yellow-400 whitespace-nowrap">≈ {item.cal} kcal</span>}
                     </div>
                   </div>
                 ))}
               </div>
 
               {/* Tổng kết calo */}
-              <div className="bg-gray-900 dark:bg-black text-white rounded-2xl p-4 space-y-2 mt-2">
+              <div className="bg-gray-900 dark:bg-black text-white rounded-2xl p-4 space-y-2">
                 <p className="text-[10px] uppercase tracking-widest text-gray-400 font-bold mb-3">Tổng kết hôm nay</p>
                 <div className="flex justify-between text-sm"><span className="text-gray-300">🍽 Thức ăn</span><span className="font-bold">{foodCal} kcal</span></div>
-                {ruouCal > 0  && <div className="flex justify-between text-sm"><span className="text-gray-300">🍷 Rượu</span><span className="font-bold">+{ruouCal} kcal</span></div>}
-                {bia500Cal > 0 && <div className="flex justify-between text-sm"><span className="text-gray-300">🍺 Bia 500ml</span><span className="font-bold">+{bia500Cal} kcal</span></div>}
-                {bia330Cal > 0 && <div className="flex justify-between text-sm"><span className="text-gray-300">🍺 Bia 330ml</span><span className="font-bold">+{bia330Cal} kcal</span></div>}
-                {burnedCal > 0 && <div className="flex justify-between text-sm"><span className="text-green-400">🏋️ Đã đốt</span><span className="font-bold text-green-400">−{burnedCal} kcal</span></div>}
-                <div className={`flex-1 border-t border-gray-700 my-1`} />
+                {ruouCal     > 0 && <div className="flex justify-between text-sm"><span className="text-gray-300">🥃 Rượu mạnh</span><span className="font-bold">+{ruouCal} kcal</span></div>}
+                {ruouVangCal > 0 && <div className="flex justify-between text-sm"><span className="text-gray-300">🍷 Rượu vang</span><span className="font-bold">+{ruouVangCal} kcal</span></div>}
+                {bia500Cal   > 0 && <div className="flex justify-between text-sm"><span className="text-gray-300">🍺 Bia 500ml</span><span className="font-bold">+{bia500Cal} kcal</span></div>}
+                {bia330Cal   > 0 && <div className="flex justify-between text-sm"><span className="text-gray-300">🍺 Bia 330ml</span><span className="font-bold">+{bia330Cal} kcal</span></div>}
+                {burnedCal   > 0 && <div className="flex justify-between text-sm"><span className="text-green-400">🏋️ Đã đốt</span><span className="font-bold text-green-400">−{burnedCal} kcal</span></div>}
+                <div className="border-t border-gray-700 my-1" />
                 <div className="flex justify-between items-center">
                   <span className="text-sm font-bold text-white">NET</span>
                   <span className={`text-2xl font-black ${netCal <= CALORIE_BUDGET ? 'text-green-400' : 'text-red-400'}`}>{netCal}</span>
@@ -795,11 +811,11 @@ export default function App() {
 
               {/* Calorie streak + weekly */}
               <div className="grid grid-cols-2 gap-3">
-                <div className="bg-green-600 text-white p-4 rounded-2xl">
-                  <p className="text-[9px] text-green-200 uppercase tracking-widest font-bold mb-1">Streak calo 🥗</p>
+                <div className="bg-black text-white p-4 rounded-2xl">
+                  <p className="text-[9px] text-gray-400 uppercase tracking-widest font-bold mb-1">Streak calo 🥗</p>
                   <div className="flex items-end gap-1.5">
                     <span className="text-3xl font-black">{calStreak}</span>
-                    <span className="text-green-200 text-xs pb-0.5">ngày ≤{CALORIE_BUDGET}</span>
+                    <span className="text-gray-400 text-xs pb-0.5">ngày ≤{CALORIE_BUDGET}</span>
                   </div>
                 </div>
                 <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700">
@@ -831,9 +847,11 @@ export default function App() {
                     <Bar dataKey="net" radius={[3, 3, 0, 0]} maxBarSize={28}>
                       {calChartData.map((entry, i) => (
                         <Cell key={i} fill={
-                          entry.net == null ? (isDark ? '#374151' : '#e5e7eb')
-                          : entry.net <= CALORIE_BUDGET ? '#22c55e'
-                          : '#ef4444'
+                          entry.net == null
+                            ? 'transparent'
+                            : entry.net <= CALORIE_BUDGET
+                              ? (isDark ? '#ffffff' : '#111827')
+                              : (isDark ? '#4b5563' : '#d1d5db')
                         } />
                       ))}
                     </Bar>
@@ -841,9 +859,8 @@ export default function App() {
                 </div>
                 <div className="flex gap-4 mt-3 justify-center">
                   {[
-                    { color: 'bg-green-500', label: `≤ ${CALORIE_BUDGET} kcal` },
-                    { color: 'bg-red-400',   label: `> ${CALORIE_BUDGET} kcal` },
-                    { color: isDark ? 'bg-gray-600' : 'bg-gray-200', label: 'Chưa chốt' }
+                    { color: isDark ? 'bg-white' : 'bg-gray-900', label: `≤ ${CALORIE_BUDGET} kcal` },
+                    { color: isDark ? 'bg-gray-600' : 'bg-gray-300', label: `> ${CALORIE_BUDGET} kcal` },
                   ].map(l => (
                     <div key={l.label} className="flex items-center gap-1.5">
                       <div className={`w-2.5 h-2.5 rounded-sm ${l.color}`} />
