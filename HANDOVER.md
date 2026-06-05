@@ -226,7 +226,49 @@ MỞ KHÓA → setShowConfirmModal(false) → setIsSubmitted(false) → Firestor
 
 ---
 
-## 9. Chi tiết kỹ thuật
+## 9. Tính năng v6 (TODO hoàn thành)
+
+### PWA icon PNG
+- `public/icon-192.png` + `public/icon-512.png` được tạo bởi `scripts/generate-icons.mjs`
+- Script viết thuần Node.js (zlib built-in), không cần npm package nào
+- Design: nền đen + vòng tròn trắng (đồng tông với app)
+- `vite.config.js` manifest cập nhật: PNG 192/512 + SVG any, workbox cache thêm `.png`
+- Để tạo lại: `node scripts/generate-icons.mjs`
+
+### Custom calorie budget
+- Hằng số đổi tên: `CAL_BUDGET_DEFAULT = 1668` (module scope, chỉ là giá trị mặc định)
+- State: `const [calorieBudget, setCalorieBudget] = useState(() => localStorage.getItem('calorieBudget') || 1668)`
+- `handleBudgetChange(val)`: validate 0 < n < 10000, lưu `localStorage.calorieBudget`
+- Toàn bộ logic (streak calo, chart, weekly, nutrition summary) dùng `calorieBudget` state
+- UI: input field trong Stats tab → Settings section; nút "reset" xuất hiện khi khác default
+
+### Advanced Stats (Stats tab → Phân tích section)
+**Ngày tốt nhất (`getBestDay`):**
+```js
+history.filter(submitted).reduce((best, l) => l.earnedPoints > best.earnedPoints ? l : best)
+```
+
+**Category yếu nhất (`getWeakestCategory`):**
+- Duyệt mỗi ngày đã submitted, tính avg score per category từ task statuses
+- Bỏ qua `pending` và `na` tasks
+- Trả về `{ category, avg }` của category có avg thấp nhất
+
+**Heatmap tháng (`getMonthHeatmap`):**
+- Calendar grid 7 cột (T2–CN), padding cho ngày đầu tháng
+- Màu ô: ≥80=đen, ≥60=xám đậm, ≥40=xám, <40=xám nhạt, chưa ghi=empty, tương lai=mờ
+- Ngày hôm nay: viền xanh `ring-blue-500`
+
+### iOS notification
+- `isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent)` — computed (không phải state)
+- `isPWAInstalled = window.navigator.standalone === true`
+- Khi `isIOS`: hiện card hướng dẫn trong Settings
+  - Nếu chưa install: hướng dẫn "Add to Home Screen" 3 bước
+  - Nếu đã install (standalone): confirm iOS 16.4+ hỗ trợ, bật toggle
+- Web Push API hoạt động trên iOS 16.4+ **chỉ khi** app được cài như PWA (standalone mode)
+
+---
+
+## 10. Chi tiết kỹ thuật
 
 ### Dark mode
 - `@custom-variant dark (&:where(.dark, .dark *))` trong `src/index.css`
@@ -279,10 +321,9 @@ npx vercel --prod   # manual deploy
 
 ## 11. TODO còn lại
 
-- [ ] **PWA icon PNG** — thêm `public/icon-192.png` + `public/icon-512.png` vào manifest
-- [ ] **Thống kê nâng cao** — ngày tốt nhất, category hay bị thấp điểm, heatmap tháng
-- [ ] **iOS notification** — Web Notification API chưa hỗ trợ iOS Safari
-- [ ] **Custom budget calo** — hiện hardcode 1668, có thể cho user tự nhập
+- [ ] **Thống kê calo nâng cao** — heatmap calo theo tháng (tương tự heatmap điểm)
+- [ ] **Biểu đồ so sánh** — điểm + calo trên cùng 1 chart (dual axis)
+- [ ] **Share / screenshot** — chia sẻ kết quả ngày lên social
 
 ---
 
@@ -364,7 +405,8 @@ service cloud.firestore {
 | v3 | 2026-06-05 | Chart 30 ngày scrollable, monthly avg fix, footer height fix, streak threshold 80 |
 | v4 | 2026-06-05 | Calorie tracker: burned, rượu mạnh 🥃, rượu vang 🍷, bia 500/330, NET vs budget 1668, calorie chart + streak trong Stats |
 | v5 | 2026-06-05 | Nutrition UX: bỏ text input giữ kcal 2-col, đổi icon rượu, streak calo màu đen, bar chart đậm/nhạt/trống |
+| v6 | 2026-06-05 | PWA PNG icons (192+512), custom budget calo, advanced stats (best day/weakest cat/heatmap), iOS notification guide |
 
 ---
 
-*Cập nhật lần cuối: 2026-06-05 — v5 final.*
+*Cập nhật lần cuối: 2026-06-05 — v6 final (all TODOs done).*
