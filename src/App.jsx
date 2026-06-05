@@ -19,7 +19,7 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const myUserId = "Admin_Tuan_123";
 const STREAK_MIN = 80;
-const CALORIE_BUDGET = 1668;
+const CAL_BUDGET_DEFAULT = 1668;
 const CAL_PER_ML_RUOU      = 2.2;
 const CAL_PER_ML_RUOU_VANG = 0.85;
 const CAL_PER_LON_500      = 230;
@@ -82,6 +82,14 @@ export default function App() {
   const [notifEnabled, setNotifEnabled] = useState(
     () => localStorage.getItem('notifEnabled') === 'true'
   );
+  const [calorieBudget, setCalorieBudget] = useState(() => {
+    const saved = localStorage.getItem('calorieBudget');
+    return saved ? Number(saved) : CAL_BUDGET_DEFAULT;
+  });
+
+  // ── iOS detection (computed once) ───────────────────────────────────────
+  const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const isPWAInstalled = window.navigator.standalone === true;
 
   // ── Dark mode effect ────────────────────────────────────────────────────
   useEffect(() => {
@@ -266,7 +274,7 @@ export default function App() {
       const d = new Date(today);
       d.setDate(today.getDate() - i);
       const log = history.find(h => h.date === getDateStr(d));
-      const good = log?.status === 'submitted' && log.netCalories != null && log.netCalories <= CALORIE_BUDGET;
+      const good = log?.status === 'submitted' && log.netCalories != null && log.netCalories <= calorieBudget;
       if (i === 0 && !good) continue;
       if (!good) break;
       streak++;
@@ -294,9 +302,62 @@ export default function App() {
       return {
         day: `${d.getDate()}/${d.getMonth() + 1}`,
         net: log?.status === 'submitted' && log.netCalories != null ? log.netCalories : null,
-        budget: CALORIE_BUDGET
+        budget: calorieBudget
       };
     });
+  };
+
+  // ── Advanced stats helpers ───────────────────────────────────────────────
+  const getBestDay = () => {
+    const done = history.filter(h => h.status === 'submitted');
+    if (!done.length) return null;
+    return done.reduce((best, l) => (l.earnedPoints || 0) > (best.earnedPoints || 0) ? l : best);
+  };
+
+  const getWeakestCategory = () => {
+    const done = history.filter(h => h.status === 'submitted' && h.tasks?.length);
+    if (!done.length) return null;
+    const scores = {};
+    categoryOrder.forEach(cat => { scores[cat] = { sum: 0, count: 0 }; });
+    done.forEach(log => {
+      categoryOrder.forEach(cat => {
+        const catBases  = baseTasks.filter(b => b.category === cat);
+        const catStates = log.tasks.filter(t => catBases.some(b => b.id === t.id) && t.status !== 'pending' && t.status !== 'na');
+        if (!catStates.length) return;
+        let totalW = 0, earnedW = 0;
+        catStates.forEach(t => {
+          const base = catBases.find(b => b.id === t.id);
+          if (!base) return;
+          totalW += base.weight;
+          if (base.type === 'binary') { if (t.status === 'completed') earnedW += base.weight; }
+          else earnedW += base.weight * ({ good: 1, quite_good: 0.8, average: 0.5, bad: 0 }[t.status] || 0);
+        });
+        if (totalW > 0) { scores[cat].sum += Math.round((earnedW / totalW) * 100); scores[cat].count++; }
+      });
+    });
+    let worst = null, low = Infinity;
+    categoryOrder.forEach(cat => {
+      if (scores[cat].count > 0) {
+        const avg = Math.round(scores[cat].sum / scores[cat].count);
+        if (avg < low) { low = avg; worst = { category: cat, avg }; }
+      }
+    });
+    return worst;
+  };
+
+  const getMonthHeatmap = () => {
+    const now = new Date();
+    const [yr, mo] = [now.getFullYear(), now.getMonth()];
+    const daysInMonth = new Date(yr, mo + 1, 0).getDate();
+    const firstDow = (new Date(yr, mo, 1).getDay() + 6) % 7; // 0=Mon
+    const cells = Array(firstDow).fill(null);
+    for (let day = 1; day <= daysInMonth; day++) {
+      const d = new Date(yr, mo, day);
+      const ds = getDateStr(d);
+      const log = history.find(h => h.date === ds);
+      cells.push({ day, ds, score: log?.status === 'submitted' ? (log.earnedPoints ?? 0) : null, isToday: ds === getDateStr(new Date()), isFuture: d > now });
+    }
+    return cells;
   };
 
   // ── Derived values ──────────────────────────────────────────────────────
@@ -309,13 +370,16 @@ export default function App() {
   const totalIntakeCal = foodCal + ruouCal + ruouVangCal + bia500Cal + bia330Cal;
   const burnedCal = Number(meals.caloriesBurned || 0);
   const netCal = totalIntakeCal - burnedCal;
-  const calDiff = netCal - CALORIE_BUDGET;
+  const calDiff = netCal - calorieBudget;
   const streak = getStreak();
   const monthlyAvg = getMonthlyAvg();
   const chartData = getChartData();
   const calChartData = getCalorieChartData();
   const calStreak = getCalorieStreak();
   const weeklyCal = getWeeklyCal();
+  const bestDay     = getBestDay();
+  const weakestCat  = getWeakestCategory();
+  const heatmapCells = getMonthHeatmap();
 
   const barColor = (entry) => {
     if (!entry.submitted) return isDark ? '#374151' : '#e5e7eb';
@@ -396,6 +460,15 @@ export default function App() {
     if (perm === 'granted') {
       setNotifEnabled(true);
       localStorage.setItem('notifEnabled', 'true');
+    }
+  };
+
+  // ── Custom budget ───────────────────────────────────────────────────────
+  const handleBudgetChange = (val) => {
+    const n = Number(val);
+    if (n > 0 && n < 10000) {
+      setCalorieBudget(n);
+      localStorage.setItem('calorieBudget', String(n));
     }
   };
 
@@ -707,17 +780,17 @@ export default function App() {
                 <div className="border-t border-gray-700 my-1" />
                 <div className="flex justify-between items-center">
                   <span className="text-sm font-bold text-white">NET</span>
-                  <span className={`text-2xl font-black ${netCal <= CALORIE_BUDGET ? 'text-green-400' : 'text-red-400'}`}>{netCal}</span>
+                  <span className={`text-2xl font-black ${netCal <= calorieBudget ? 'text-green-400' : 'text-red-400'}`}>{netCal}</span>
                 </div>
                 <div className="flex justify-between text-xs text-gray-400">
-                  <span>Budget: {CALORIE_BUDGET} kcal</span>
+                  <span>Budget: {calorieBudget} kcal</span>
                   <span className={calDiff <= 0 ? 'text-green-400' : 'text-red-400'}>
                     {calDiff <= 0 ? `✓ còn ${Math.abs(calDiff)} kcal` : `⚠ vượt ${calDiff} kcal`}
                   </span>
                 </div>
                 <div className="w-full bg-gray-700 rounded-full h-1.5 overflow-hidden mt-1">
-                  <div className={`h-full rounded-full transition-all duration-700 ${netCal <= CALORIE_BUDGET ? 'bg-green-400' : 'bg-red-400'}`}
-                    style={{ width: `${Math.min((netCal / CALORIE_BUDGET) * 100, 100)}%` }} />
+                  <div className={`h-full rounded-full transition-all duration-700 ${netCal <= calorieBudget ? 'bg-green-400' : 'bg-red-400'}`}
+                    style={{ width: `${Math.min((netCal / calorieBudget) * 100, 100)}%` }} />
                 </div>
               </div>
 
@@ -815,15 +888,15 @@ export default function App() {
                   <p className="text-[9px] text-gray-400 uppercase tracking-widest font-bold mb-1">Streak calo 🥗</p>
                   <div className="flex items-end gap-1.5">
                     <span className="text-3xl font-black">{calStreak}</span>
-                    <span className="text-gray-400 text-xs pb-0.5">ngày ≤{CALORIE_BUDGET}</span>
+                    <span className="text-gray-400 text-xs pb-0.5">ngày ≤{calorieBudget}</span>
                   </div>
                 </div>
                 <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700">
                   <p className="text-[9px] text-gray-400 uppercase tracking-widest font-bold mb-1">Tuần này 📅</p>
                   <div className="flex items-end gap-1">
-                    <span className={`text-2xl font-black ${weeklyCal <= CALORIE_BUDGET * 7 ? 'text-green-600 dark:text-green-400' : 'text-red-500'}`}>{weeklyCal.toLocaleString()}</span>
+                    <span className={`text-2xl font-black ${weeklyCal <= calorieBudget * 7 ? 'text-green-600 dark:text-green-400' : 'text-red-500'}`}>{weeklyCal.toLocaleString()}</span>
                   </div>
-                  <p className="text-[9px] text-gray-400 mt-0.5">budget: {(CALORIE_BUDGET * 7).toLocaleString()} kcal</p>
+                  <p className="text-[9px] text-gray-400 mt-0.5">budget: {(calorieBudget * 7).toLocaleString()} kcal</p>
                 </div>
               </div>
 
@@ -838,7 +911,7 @@ export default function App() {
                     <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#f3f4f6'} vertical={false} />
                     <XAxis dataKey="day" tick={{ fontSize: 9, fill: axisColor }} axisLine={false} tickLine={false} interval={0} />
                     <YAxis tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
-                    <ReferenceLine y={CALORIE_BUDGET} stroke={isDark ? '#facc15' : '#f59e0b'} strokeDasharray="4 3" strokeWidth={1.5} label={{ value: `${CALORIE_BUDGET}`, fill: isDark ? '#facc15' : '#d97706', fontSize: 9, position: 'insideTopRight' }} />
+                    <ReferenceLine y={calorieBudget} stroke={isDark ? '#facc15' : '#f59e0b'} strokeDasharray="4 3" strokeWidth={1.5} label={{ value: `${calorieBudget}`, fill: isDark ? '#facc15' : '#d97706', fontSize: 9, position: 'insideTopRight' }} />
                     <Tooltip
                       cursor={{ fill: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)' }}
                       contentStyle={{ backgroundColor: isDark ? '#1f2937' : '#fff', border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: 8, color: isDark ? '#f9fafb' : '#111', fontSize: 12 }}
@@ -849,7 +922,7 @@ export default function App() {
                         <Cell key={i} fill={
                           entry.net == null
                             ? 'transparent'
-                            : entry.net <= CALORIE_BUDGET
+                            : entry.net <= calorieBudget
                               ? (isDark ? '#ffffff' : '#111827')
                               : (isDark ? '#4b5563' : '#d1d5db')
                         } />
@@ -859,12 +932,80 @@ export default function App() {
                 </div>
                 <div className="flex gap-4 mt-3 justify-center">
                   {[
-                    { color: isDark ? 'bg-white' : 'bg-gray-900', label: `≤ ${CALORIE_BUDGET} kcal` },
-                    { color: isDark ? 'bg-gray-600' : 'bg-gray-300', label: `> ${CALORIE_BUDGET} kcal` },
+                    { color: isDark ? 'bg-white' : 'bg-gray-900', label: `≤ ${calorieBudget} kcal` },
+                    { color: isDark ? 'bg-gray-600' : 'bg-gray-300', label: `> ${calorieBudget} kcal` },
                   ].map(l => (
                     <div key={l.label} className="flex items-center gap-1.5">
                       <div className={`w-2.5 h-2.5 rounded-sm ${l.color}`} />
                       <span className="text-[10px] text-gray-400">{l.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── ADVANCED STATS ─────────────────────────────────────── */}
+              <div className="flex items-center pt-1"><div className={`flex-1 ${divider}`} /><span className="px-3 text-[11px] font-bold text-gray-400 uppercase tracking-widest">Phân tích</span><div className={`flex-1 ${divider}`} /></div>
+
+              {/* Best day + Weakest category */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className={`${card} p-4 shadow-sm`}>
+                  <p className="text-[9px] text-gray-400 uppercase tracking-widest font-bold mb-2">🏆 Ngày tốt nhất</p>
+                  {bestDay ? (
+                    <>
+                      <span className="text-2xl font-black text-black dark:text-white">{bestDay.earnedPoints}</span>
+                      <span className="text-gray-400 text-xs ml-1">điểm</span>
+                      <p className="text-[10px] text-gray-400 mt-1">{bestDay.date}</p>
+                    </>
+                  ) : <p className="text-xs text-gray-400 italic">Chưa có dữ liệu</p>}
+                </div>
+                <div className={`${card} p-4 shadow-sm`}>
+                  <p className="text-[9px] text-gray-400 uppercase tracking-widest font-bold mb-2">📉 Category yếu nhất</p>
+                  {weakestCat ? (
+                    <>
+                      <p className="text-[11px] font-bold text-black dark:text-white leading-snug">{weakestCat.category}</p>
+                      <p className="text-[10px] text-gray-400 mt-1">TB: <span className="font-bold text-red-500">{weakestCat.avg}</span>/100</p>
+                    </>
+                  ) : <p className="text-xs text-gray-400 italic">Chưa có dữ liệu</p>}
+                </div>
+              </div>
+
+              {/* Monthly heatmap */}
+              <div className={`${card} p-4 shadow-sm`}>
+                <h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm mb-3">
+                  Tháng {new Date().getMonth() + 1}/{new Date().getFullYear()}
+                </h3>
+                <div className="grid grid-cols-7 gap-[3px] mb-1">
+                  {['T2','T3','T4','T5','T6','T7','CN'].map(d => (
+                    <div key={d} className="text-center text-[9px] text-gray-400 font-bold">{d}</div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-7 gap-[3px]">
+                  {heatmapCells.map((cell, i) => {
+                    if (!cell) return <div key={`pad-${i}`} className="aspect-square" />;
+                    const bg = cell.isFuture ? (isDark ? 'bg-gray-800' : 'bg-gray-100 opacity-40')
+                      : cell.score === null  ? (isDark ? 'bg-gray-800' : 'bg-gray-100')
+                      : cell.score >= 80 ? (isDark ? 'bg-white' : 'bg-black')
+                      : cell.score >= 60 ? (isDark ? 'bg-gray-400' : 'bg-gray-500')
+                      : cell.score >= 40 ? (isDark ? 'bg-gray-600' : 'bg-gray-300')
+                      : (isDark ? 'bg-gray-700' : 'bg-gray-200');
+                    return (
+                      <div key={cell.ds} className="flex flex-col items-center">
+                        <div className={`w-full aspect-square rounded-sm ${bg} ${cell.isToday ? 'ring-1 ring-blue-500 ring-offset-1' : ''}`} />
+                        <span className="text-[7px] text-gray-400 mt-0.5">{cell.day}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex gap-3 mt-3 justify-center flex-wrap">
+                  {[
+                    { color: isDark ? 'bg-white' : 'bg-black', label: '≥80' },
+                    { color: isDark ? 'bg-gray-400' : 'bg-gray-500', label: '≥60' },
+                    { color: isDark ? 'bg-gray-600' : 'bg-gray-300', label: '≥40' },
+                    { color: isDark ? 'bg-gray-800' : 'bg-gray-100', label: 'Chưa ghi' },
+                  ].map(l => (
+                    <div key={l.label} className="flex items-center gap-1">
+                      <div className={`w-2 h-2 rounded-sm ${l.color}`} />
+                      <span className="text-[9px] text-gray-400">{l.label}</span>
                     </div>
                   ))}
                 </div>
@@ -885,8 +1026,29 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Notification settings */}
-              <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700">
+              {/* ── SETTINGS ─────────────────────────────────────────────── */}
+              <div className="flex items-center pt-1"><div className={`flex-1 ${divider}`} /><span className="px-3 text-[11px] font-bold text-gray-400 uppercase tracking-widest">Cài đặt</span><div className={`flex-1 ${divider}`} /></div>
+
+              {/* Custom calorie budget */}
+              <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 space-y-1">
+                <p className="text-[13px] font-bold text-black dark:text-white">🎯 Budget calo / ngày</p>
+                <p className="text-[11px] text-gray-400">Mặc định: {CAL_BUDGET_DEFAULT} kcal</p>
+                <div className="flex gap-2 items-center mt-2">
+                  <input
+                    type="number"
+                    value={calorieBudget}
+                    onChange={e => handleBudgetChange(e.target.value)}
+                    className="flex-1 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm font-bold outline-none text-gray-700 dark:text-gray-200 focus:border-black dark:focus:border-white"
+                  />
+                  <span className="text-xs text-gray-500 font-medium">kcal</span>
+                  {calorieBudget !== CAL_BUDGET_DEFAULT && (
+                    <button onClick={() => handleBudgetChange(CAL_BUDGET_DEFAULT)} className="text-[11px] text-gray-400 underline">reset</button>
+                  )}
+                </div>
+              </div>
+
+              {/* Notification + iOS */}
+              <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 space-y-3">
                 <div className="flex justify-between items-center">
                   <div>
                     <p className="text-[13px] font-bold text-black dark:text-white">🔔 Nhắc nhở buổi tối</p>
@@ -903,6 +1065,24 @@ export default function App() {
                     <span className={`absolute top-0.5 w-5 h-5 rounded-full shadow transition-all ${notifEnabled && notifPermission === 'granted' ? 'left-[26px] bg-white dark:bg-gray-900' : 'left-0.5 bg-white dark:bg-gray-300'}`} />
                   </button>
                 </div>
+                {/* iOS note */}
+                {isIOS && (
+                  <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 border border-blue-100 dark:border-blue-800">
+                    <p className="text-[11px] font-bold text-blue-700 dark:text-blue-400 mb-1">📱 iOS — Cách nhận thông báo</p>
+                    {isPWAInstalled ? (
+                      <p className="text-[10px] text-blue-600 dark:text-blue-300 leading-relaxed">
+                        App đã cài ✓ — iOS 16.4+ hỗ trợ thông báo. Nhấn toggle để bật.
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-blue-600 dark:text-blue-300 leading-relaxed">
+                        Để nhận thông báo trên iPhone/iPad (iOS ≥ 16.4):<br />
+                        1. Bấm nút <strong>Chia sẻ</strong> trong Safari<br />
+                        2. Chọn <strong>"Thêm vào Màn hình chính"</strong><br />
+                        3. Mở app từ màn hình chính → bật toggle 🔔
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
             </div>
