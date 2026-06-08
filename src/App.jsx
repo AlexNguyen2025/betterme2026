@@ -116,6 +116,9 @@ export default function App() {
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
   }, [isDark]);
 
+  // ── Đóng modal khi ngày đã chốt (safety reset) ──────────────────────────
+  useEffect(() => { if (isSubmitted) setShowConfirmModal(false); }, [isSubmitted]);
+
   // ── Auto-logout after 1 min idle ─────────────────────────────────────────
   useEffect(() => {
     if (!isAuthed) return;
@@ -551,10 +554,11 @@ export default function App() {
       ));
     }
   };
-  const handleRevise = async () => {
-    setShowConfirmModal(false); // đóng modal nếu còn mở
+  const handleRevise = () => {
+    // Unlock ngay, không hỏi gì — state update đồng bộ, Firestore write nền
+    setShowConfirmModal(false);
     setIsSubmitted(false);
-    await setDoc(doc(db, 'users', myUserId, 'daily_logs', selectedDateStr), { status: 'draft' }, { merge: true });
+    setDoc(doc(db, 'users', myUserId, 'daily_logs', selectedDateStr), { status: 'draft' }, { merge: true });
   };
 
   const statusLabel = (status, type) => {
@@ -1238,7 +1242,7 @@ export default function App() {
         </div>
 
         {/* ── MODAL ──────────────────────────────────────────────────────── */}
-        {showConfirmModal && (
+        {showConfirmModal && !isSubmitted && (
           <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-6" onClick={() => setShowConfirmModal(false)}>
             <div className="bg-white dark:bg-gray-900 border dark:border-gray-700 rounded-3xl p-6 w-full max-w-sm shadow-xl" onClick={e => e.stopPropagation()}>
               <h3 className="text-lg font-black text-black dark:text-white mb-2">Chốt sổ ngày này?</h3>
