@@ -993,24 +993,34 @@ export default function App() {
                   <span className="text-[10px] text-gray-400 italic">← vuốt</span>
                 </div>
                 <div ref={calChartScrollRef} className="overflow-x-auto -mx-4 px-2" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-                  <BarChart width={calChartData.length * 36} height={175} data={calChartData} margin={{ top: 18, right: 8, left: -10, bottom: 0 }}>
+                  <BarChart width={calChartData.length * 36} height={200} data={calChartData} margin={{ top: 20, right: 12, left: -10, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#f3f4f6'} vertical={false} />
                     <XAxis dataKey="day" tick={{ fontSize: 9, fill: axisColor }} axisLine={false} tickLine={false} interval={0} />
-                    <YAxis tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
-                    <ReferenceLine y={calorieBudget} stroke={isDark ? '#facc15' : '#f59e0b'} strokeDasharray="4 3" strokeWidth={1.5} label={{ value: `${calorieBudget}`, fill: isDark ? '#facc15' : '#d97706', fontSize: 9, position: 'insideTopRight' }} />
+                    {/* Domain: từ 0 đến max(data, budget*1.3) — đảm bảo bar overbudget + đường kẻ đều hiển thị */}
+                    <YAxis
+                      domain={[0, dataMax => Math.max(Math.ceil(dataMax * 1.15 / 100) * 100, Math.ceil(calorieBudget * 1.3 / 100) * 100)]}
+                      tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false}
+                    />
+                    {/* Đường ngân sách ngang */}
+                    <ReferenceLine
+                      y={calorieBudget}
+                      stroke={isDark ? '#facc15' : '#f59e0b'}
+                      strokeWidth={2}
+                      label={{ value: `Budget ${calorieBudget}`, fill: isDark ? '#facc15' : '#d97706', fontSize: 9, position: 'insideTopRight' }}
+                    />
                     <Tooltip
                       cursor={{ fill: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)' }}
                       contentStyle={{ backgroundColor: isDark ? '#1f2937' : '#fff', border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`, borderRadius: 8, color: isDark ? '#f9fafb' : '#111', fontSize: 12 }}
                       formatter={v => v != null ? [`${v} kcal`, 'Net'] : ['—', 'Chưa có']}
                     />
-                    <Bar dataKey="net" radius={[3, 3, 0, 0]} maxBarSize={28}>
+                    <Bar dataKey="net" radius={[3, 3, 0, 0]} maxBarSize={28} minPointSize={2}>
                       {calChartData.map((entry, i) => (
                         <Cell key={i} fill={
                           entry.net == null
                             ? 'transparent'
                             : entry.net <= calorieBudget
-                              ? (isDark ? '#ffffff' : '#111827')
-                              : (isDark ? '#4b5563' : '#d1d5db')
+                              ? (isDark ? '#ffffff' : '#111827')   /* đạt: đậm */
+                              : (isDark ? '#f87171' : '#ef4444')   /* vượt: đỏ rõ */
                         } />
                       ))}
                     </Bar>
@@ -1018,8 +1028,9 @@ export default function App() {
                 </div>
                 <div className="flex gap-4 mt-3 justify-center">
                   {[
-                    { color: isDark ? 'bg-white' : 'bg-gray-900', label: `≤ ${calorieBudget} kcal` },
-                    { color: isDark ? 'bg-gray-600' : 'bg-gray-300', label: `> ${calorieBudget} kcal` },
+                    { color: isDark ? 'bg-white' : 'bg-gray-900', label: `≤ ${calorieBudget} (đạt)` },
+                    { color: 'bg-red-400',                         label: `> ${calorieBudget} (vượt)` },
+                    { color: 'bg-yellow-400',                      label: 'Đường budget' },
                   ].map(l => (
                     <div key={l.label} className="flex items-center gap-1.5">
                       <div className={`w-2.5 h-2.5 rounded-sm ${l.color}`} />
