@@ -18,6 +18,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const myUserId = "Admin_Tuan_123";
+const APP_PIN  = '0009';
 const STREAK_MIN = 80;
 const CAL_BUDGET_DEFAULT = 1668;
 const CAL_PER_ML_RUOU      = 2.2;
@@ -46,6 +47,24 @@ const baseTasks = [
 const categoryOrder = ['Chăm sóc bản thân', 'Tư duy chuẩn', 'Tiến về phía trước', 'Tổng kết'];
 
 export default function App() {
+  // ── PIN auth state ──────────────────────────────────────────────────────
+  const [isAuthed,  setIsAuthed]  = useState(() => sessionStorage.getItem('bm_auth') === '1');
+  const [pinInput,  setPinInput]  = useState('');
+  const [pinError,  setPinError]  = useState(false);
+  const [pinShake,  setPinShake]  = useState(false);
+
+  const handlePinSubmit = () => {
+    if (pinInput === APP_PIN) {
+      sessionStorage.setItem('bm_auth', '1');
+      setIsAuthed(true);
+    } else {
+      setPinError(true);
+      setPinShake(true);
+      setPinInput('');
+      setTimeout(() => { setPinError(false); setPinShake(false); }, 800);
+    }
+  };
+
   // ── Core state ──────────────────────────────────────────────────────────
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -504,6 +523,54 @@ export default function App() {
       : <span className="text-gray-500">Không</span>;
     return <span className="text-black dark:text-white font-medium">{{ good: 'Tốt', quite_good: 'Khá', average: 'Trung bình', bad: 'Tệ' }[status]}</span>;
   };
+
+  // ── PIN gate ────────────────────────────────────────────────────────────
+  if (!isAuthed) return (
+    <div className="min-h-screen bg-black flex flex-col items-center justify-center p-8 select-none">
+      <div className="w-full max-w-xs">
+        {/* Logo */}
+        <div className="text-center mb-12">
+          <div className="w-16 h-16 rounded-full border-2 border-white/20 flex items-center justify-center mx-auto mb-5">
+            <div className="w-8 h-8 rounded-full border-2 border-white/60 flex items-center justify-center">
+              <div className="w-2 h-2 rounded-full bg-white" />
+            </div>
+          </div>
+          <h1 className="text-white text-xl font-black tracking-tighter uppercase">BETTER ME</h1>
+          <p className="text-gray-600 text-[10px] tracking-widest uppercase mt-1">Antoine 2026</p>
+        </div>
+
+        {/* PIN input */}
+        <div className="space-y-3">
+          <input
+            type="password"
+            inputMode="numeric"
+            value={pinInput}
+            onChange={e => { setPinInput(e.target.value); setPinError(false); }}
+            onKeyDown={e => e.key === 'Enter' && handlePinSubmit()}
+            placeholder="••••"
+            autoFocus
+            maxLength={20}
+            className={`w-full bg-gray-900 border rounded-2xl px-4 py-4 text-white text-center text-2xl font-black tracking-[0.5em] outline-none transition-all duration-200 placeholder:text-gray-700 ${
+              pinError
+                ? 'border-red-500 bg-red-950/30'
+                : 'border-gray-800 focus:border-gray-500'
+            } ${pinShake ? 'animate-shake' : ''}`}
+          />
+          {pinError && (
+            <p className="text-red-400 text-[11px] text-center tracking-widest uppercase font-medium">
+              Sai mật khẩu
+            </p>
+          )}
+          <button
+            onClick={handlePinSubmit}
+            className="w-full bg-white text-black font-black py-4 rounded-2xl text-xs tracking-widest uppercase mt-2 active:scale-95 transition-transform"
+          >
+            Vào app
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
   if (isLoading) return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 text-gray-400 font-light tracking-widest uppercase text-xs">
