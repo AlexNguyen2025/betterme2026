@@ -538,8 +538,18 @@ export default function App() {
   const confirmSubmit = async () => {
     setShowConfirmModal(false);
     setIsSubmitted(true);
-    // Dùng syncToCloud để đảm bảo netCalories luôn được tính & lưu đúng lúc chốt sổ
+    // Chốt ngày hiện tại (đầy đủ, có netCalories)
     await syncToCloud(todayTasks, dailyJournal, meals, reflections, 'submitted');
+    // Auto-chốt tất cả ngày draft trước ngày này
+    const prevDrafts = history.filter(h => h.date < selectedDateStr && h.status === 'draft');
+    if (prevDrafts.length > 0) {
+      await Promise.all(prevDrafts.map(log =>
+        setDoc(doc(db, 'users', myUserId, 'daily_logs', log.date),
+          { status: 'submitted', netCalories: log.netCalories ?? computeNetFromMeals(log.meals) },
+          { merge: true }
+        )
+      ));
+    }
   };
   const handleRevise = async () => {
     setShowConfirmModal(false); // đóng modal nếu còn mở
