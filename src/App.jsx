@@ -116,6 +116,25 @@ export default function App() {
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
   }, [isDark]);
 
+  // ── Auto-logout after 1 min idle ─────────────────────────────────────────
+  useEffect(() => {
+    if (!isAuthed) return;
+    const IDLE_MS = 60_000;
+    let timer;
+    const reset = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        sessionStorage.removeItem('bm_auth');
+        setIsAuthed(false);
+        setPinInput('');
+      }, IDLE_MS);
+    };
+    const events = ['mousemove', 'mousedown', 'touchstart', 'keydown', 'scroll', 'click'];
+    events.forEach(e => window.addEventListener(e, reset, { passive: true }));
+    reset();
+    return () => { clearTimeout(timer); events.forEach(e => window.removeEventListener(e, reset)); };
+  }, [isAuthed]);
+
   // ── Helpers ─────────────────────────────────────────────────────────────
   const getDateStr = (d) => {
     const y = d.getFullYear();
