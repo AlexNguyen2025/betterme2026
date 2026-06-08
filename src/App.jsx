@@ -305,6 +305,20 @@ export default function App() {
   }, [activeTab, history]);
 
   // ── Calorie helpers ──────────────────────────────────────────────────────
+  // Tính netCal từ meals — fallback cho log cũ chưa có trường netCalories
+  const computeNetFromMeals = (m) => {
+    if (!m) return 0;
+    return ['breakfastCal','lunchCal','dinnerCal','snackCal'].reduce((a,k) => a + Number(m[k]||0), 0)
+      + Math.round(Number(m.ruouMl||0)     * CAL_PER_ML_RUOU)
+      + Math.round(Number(m.ruouVangMl||0) * CAL_PER_ML_RUOU_VANG)
+      + Number(m.bia500Cans||0) * CAL_PER_LON_500
+      + Number(m.bia330Cans||0) * CAL_PER_LON_330
+      - Number(m.caloriesBurned||0);
+  };
+
+  const getLogNet = (log) =>
+    log.netCalories != null ? log.netCalories : computeNetFromMeals(log.meals);
+
   const getCalorieStreak = () => {
     let streak = 0;
     const today = new Date();
@@ -312,7 +326,7 @@ export default function App() {
       const d = new Date(today);
       d.setDate(today.getDate() - i);
       const log = history.find(h => h.date === getDateStr(d));
-      const good = log?.status === 'submitted' && log.netCalories != null && log.netCalories <= calorieBudget;
+      const good = log?.status === 'submitted' && getLogNet(log) <= calorieBudget;
       if (i === 0 && !good) continue;
       if (!good) break;
       streak++;
@@ -326,8 +340,8 @@ export default function App() {
       const d = new Date(today);
       d.setDate(today.getDate() - i);
       return history.find(h => h.date === getDateStr(d));
-    }).filter(l => l?.status === 'submitted' && l.netCalories != null)
-      .reduce((s, l) => s + l.netCalories, 0);
+    }).filter(l => l?.status === 'submitted')
+      .reduce((s, l) => s + getLogNet(l), 0);
   };
 
   const getCalorieChartData = () => {
@@ -337,11 +351,9 @@ export default function App() {
       d.setDate(today.getDate() - (29 - i));
       const dateStr = getDateStr(d);
       const log = history.find(h => h.date === dateStr);
-      return {
-        day: `${d.getDate()}/${d.getMonth() + 1}`,
-        net: log?.status === 'submitted' && log.netCalories != null ? log.netCalories : null,
-        budget: calorieBudget
-      };
+      // Hiện bar nếu đã chốt sổ — dùng netCalories hoặc tính lại từ meals
+      const net = log?.status === 'submitted' ? getLogNet(log) : null;
+      return { day: `${d.getDate()}/${d.getMonth() + 1}`, net, budget: calorieBudget };
     });
   };
 
@@ -526,7 +538,8 @@ export default function App() {
   const confirmSubmit = async () => {
     setShowConfirmModal(false);
     setIsSubmitted(true);
-    await setDoc(doc(db, 'users', myUserId, 'daily_logs', selectedDateStr), { status: 'submitted' }, { merge: true });
+    // Dùng syncToCloud để đảm bảo netCalories luôn được tính & lưu đúng lúc chốt sổ
+    await syncToCloud(todayTasks, dailyJournal, meals, reflections, 'submitted');
   };
   const handleRevise = async () => {
     setShowConfirmModal(false); // đóng modal nếu còn mở
