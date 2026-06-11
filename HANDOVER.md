@@ -102,7 +102,7 @@ const CAL_PER_LON_500      = 230;
 const CAL_PER_LON_330      = 150;
 ```
 
-Budget calo còn lưu trong `localStorage('calorieBudget')` — user có thể tự chỉnh trong tab Stats.
+Budget calo lưu trong `localStorage('calorieBudget')`. Monthly goal lưu trong `localStorage('monthlyGoal')`.
 
 ---
 
@@ -191,6 +191,13 @@ netCal = foodCal + ruouCal + ruouVangCal + bia500Cal + bia330Cal − burnedCal
 - **PWA** installable (icon-192/512 PNG, manifest, Workbox)
 - Điều hướng ngày ← →, realtime sync badge
 
+### v8 — Tính năng mới (2026-06-11)
+- **Trend arrow** — Score card hiện ↑↓ + số điểm chênh lệch so với TB 7 ngày qua (xanh/đỏ)
+- **Monthly goal** — Banner xanh đầu tab Performance; đặt/sửa/xóa trong Settings
+- **Task comment history** — Icon đồng hồ cạnh mỗi ô ghi chú → bottom sheet 7 ghi chú gần nhất theo ngày
+- **Weekly Review card** — Tab Stats (sau streak): TB điểm, TB calo, ngày tốt nhất, task yếu nhất trong 7 ngày
+- **Calorie rolling avg** — Đường xanh nét đứt trên calorie chart = TB NET 7 ngày liền trước
+
 ---
 
 ## 9. Luồng UX quan trọng
@@ -246,9 +253,11 @@ MỞ KHÓA → handleRevise():
 - Khi timeout: `sessionStorage.removeItem('bm_auth')` + `setIsAuthed(false)`
 
 ### Recharts scrollable chart
-- `BarChart width={data.length * 36}` fixed trong `div overflow-x-auto`
+- Score chart: `BarChart width={data.length * 36}` fixed, trong `div overflow-x-auto`
+- Calorie chart: `ComposedChart` (để thêm `Line`) với `Bar` + `Line` (rolling avg)
 - `useRef` + `useEffect` auto-scroll về phải (ngày mới nhất) khi mở tab Stats
 - Calorie chart `YAxis domain={[0, dataMax => max(dataMax*1.15, budget*1.3)]}` — luôn hiện bar overbudget
+- Calorie rolling avg: `calChartDataWithAvg` — mỗi điểm = TB NET 7 ngày liền trước (chỉ tính ngày đã submitted)
 
 ### PWA icons
 - `scripts/generate-icons.mjs` — pure Node.js, không deps, tạo solid black PNG với circle design
