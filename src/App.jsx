@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, onSnapshot } from 'firebase/firestore';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, ReferenceLine } from 'recharts';
+import { ComposedChart, BarChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Cell, ReferenceLine } from 'recharts';
 import * as XLSX from 'xlsx';
 
 const firebaseConfig = {
@@ -105,6 +105,9 @@ export default function App() {
     const saved = localStorage.getItem('calorieBudget');
     return saved ? Number(saved) : CAL_BUDGET_DEFAULT;
   });
+  const [commentHistoryTaskId, setCommentHistoryTaskId] = useState(null);
+  const [monthlyGoal, setMonthlyGoal] = useState(() => localStorage.getItem('monthlyGoal') || '');
+  const [editingGoal, setEditingGoal] = useState(false);
 
   // ── iOS detection (computed once) ───────────────────────────────────────
   const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
@@ -398,6 +401,70 @@ export default function App() {
     return worst;
   };
 
+  const getScoreTrend = () => {
+    const last7 = [];
+    const today = new Date();
+    for (let i = 1; i <= 7; i++) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const log = history.find(h => h.date === getDateStr(d));
+      if (log?.status === 'submitted') {
+        last7.push(log.earnedPoints != null ? log.earnedPoints : calculateScore(log.tasks || []).earned);
+      }
+    }
+    if (!last7.length) return null;
+    const avg = Math.round(last7.reduce((s, v) => s + v, 0) / last7.length);
+    return { avg, diff: score.earned - avg };
+  };
+
+  const getWeeklyReview = () => {
+    const today = new Date();
+    const logs = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const log = history.find(h => h.date === getDateStr(d));
+      if (log?.status === 'submitted') logs.push(log);
+    }
+    if (!logs.length) return null;
+    const avgScore = Math.round(logs.reduce((s, l) => s + (l.earnedPoints ?? 0), 0) / logs.length);
+    const avgCal = Math.round(logs.reduce((s, l) => s + getLogNet(l), 0) / logs.length);
+    const best = logs.reduce((b, l) => (l.earnedPoints ?? 0) > (b.earnedPoints ?? 0) ? l : b);
+    const taskTotals = {};
+    baseTasks.forEach(b => { taskTotals[b.id] = { sum: 0, count: 0, text: b.text }; });
+    logs.forEach(log => {
+      (log.tasks || []).forEach(t => {
+        const base = baseTasks.find(b => b.id === t.id);
+        if (!base || t.status === 'pending' || t.status === 'na') return;
+        const pts = base.type === 'binary'
+          ? (t.status === 'completed' ? 100 : 0)
+          : ({ good: 100, quite_good: 80, average: 50, bad: 0 }[t.status] ?? 0);
+        taskTotals[t.id].sum += pts;
+        taskTotals[t.id].count++;
+      });
+    });
+    let weakestTask = null, low = Infinity;
+    Object.values(taskTotals).forEach(v => {
+      if (v.count > 0) {
+        const avg = Math.round(v.sum / v.count);
+        if (avg < low) { low = avg; weakestTask = { text: v.text, avg }; }
+      }
+    });
+    return { avgScore, avgCal, best, weakestTask, count: logs.length };
+  };
+
+  const getTaskCommentHistory = (taskId) => {
+    return history
+      .filter(h => h.status === 'submitted')
+      .map(h => {
+        const t = (h.tasks || []).find(t => t.id === taskId);
+        return t?.comment ? { date: h.date, comment: t.comment } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 7);
+  };
+
   const getMonthHeatmap = () => {
     const now = new Date();
     const [yr, mo] = [now.getFullYear(), now.getMonth()];
@@ -433,6 +500,13 @@ export default function App() {
   const bestDay     = getBestDay();
   const weakestCat  = getWeakestCategory();
   const heatmapCells = getMonthHeatmap();
+  const scoreTrend = getScoreTrend();
+  const weeklyReview = getWeeklyReview();
+  const calChartDataWithAvg = calChartData.map((d, i, arr) => {
+    const w = arr.slice(Math.max(0, i - 6), i + 1).filter(x => x.net != null);
+    const avg = w.length ? Math.round(w.reduce((s, x) => s + x.net, 0) / w.length) : null;
+    return { ...d, rollingAvg: avg };
+  });
 
   const barColor = (entry) => {
     if (!entry.submitted) return isDark ? '#374151' : '#e5e7eb';
@@ -669,6 +743,15 @@ export default function App() {
           {/* ── TAB: PERFORMANCE ───────────────────────────────────────── */}
           {activeTab === 'performance' && (
             <div className="space-y-8">
+              {monthlyGoal && (
+                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-2xl px-4 py-3 flex items-center gap-3">
+                  <span className="text-lg">🎯</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[9px] text-blue-600 dark:text-blue-400 uppercase tracking-widest font-bold mb-0.5">Mục tiêu tháng</p>
+                    <p className="text-[13px] font-semibold text-blue-800 dark:text-blue-200 truncate">{monthlyGoal}</p>
+                  </div>
+                </div>
+              )}
               <div className="px-5 py-4 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700">
                 <p className="text-[13.5px] text-gray-500 dark:text-gray-400 italic leading-relaxed text-center font-medium">
                   "Mục tiêu của bạn cần một người nuôi dưỡng chăm sóc vun trồng mỗi ngày" - Jim Rohn
@@ -680,7 +763,14 @@ export default function App() {
                 <div className="flex justify-between items-end mb-2">
                   <div>
                     <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold mb-1">Điểm số trong ngày</p>
-                    <span className="text-4xl font-black">{score.earned}</span>
+                    <div className="flex items-end gap-2">
+                      <span className="text-4xl font-black">{score.earned}</span>
+                      {scoreTrend && (
+                        <span className={`text-sm font-bold pb-1 ${scoreTrend.diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {scoreTrend.diff >= 0 ? '↑' : '↓'}{Math.abs(scoreTrend.diff)}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="text-xs text-gray-400 font-medium pb-1">Mục tiêu: {score.total}</div>
                 </div>
@@ -739,18 +829,25 @@ export default function App() {
                                   </div>
                             )
                           }
-                          {!isNA && (
-                            <input type="text" placeholder="Ghi chú thêm (không bắt buộc)..."
-                              value={st.comment || ''}
-                              onChange={e => setComment(base.id, e.target.value)}
-                              onBlur={handleBlur}
-                              readOnly={isSubmitted}
-                              className={`w-full mt-2 text-[12px] px-3 py-2.5 rounded-lg border outline-none transition-colors ${
-                                isSubmitted && !st.comment ? 'hidden'
-                                : isSubmitted ? 'bg-transparent border-transparent text-gray-500 dark:text-gray-400 italic px-0'
-                                : 'bg-gray-50 dark:bg-gray-800 border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-300 focus:bg-white dark:focus:bg-gray-700 focus:border-gray-300 dark:focus:border-gray-600'
-                              }`}
-                            />
+                          {!isNA && !(isSubmitted && !st.comment) && (
+                            <div className="flex items-start gap-1 mt-2">
+                              <input type="text" placeholder="Ghi chú thêm (không bắt buộc)..."
+                                value={st.comment || ''}
+                                onChange={e => setComment(base.id, e.target.value)}
+                                onBlur={handleBlur}
+                                readOnly={isSubmitted}
+                                className={`flex-1 text-[12px] px-3 py-2.5 rounded-lg border outline-none transition-colors ${
+                                  isSubmitted ? 'bg-transparent border-transparent text-gray-500 dark:text-gray-400 italic px-0'
+                                  : 'bg-gray-50 dark:bg-gray-800 border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-300 focus:bg-white dark:focus:bg-gray-700 focus:border-gray-300 dark:focus:border-gray-600'
+                                }`}
+                              />
+                              <button
+                                onClick={() => setCommentHistoryTaskId(base.id)}
+                                className="flex-shrink-0 p-2 text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 transition-colors"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                              </button>
+                            </div>
                           )}
                         </div>
                       );
@@ -953,6 +1050,37 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Weekly Review */}
+              {weeklyReview && (
+                <div className={`${card} p-4 shadow-sm`}>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm">Tổng kết 7 ngày</h3>
+                    <span className="text-[10px] text-gray-400">{weeklyReview.count} ngày đã chốt</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 mb-3">
+                    <div className="text-center bg-gray-50 dark:bg-gray-800 rounded-xl py-2.5">
+                      <p className="text-[8px] text-gray-400 uppercase tracking-widest font-bold mb-1">TB điểm</p>
+                      <span className="text-xl font-black text-black dark:text-white">{weeklyReview.avgScore}</span>
+                    </div>
+                    <div className="text-center bg-gray-50 dark:bg-gray-800 rounded-xl py-2.5">
+                      <p className="text-[8px] text-gray-400 uppercase tracking-widest font-bold mb-1">TB calo</p>
+                      <span className={`text-xl font-black ${weeklyReview.avgCal <= calorieBudget ? 'text-green-600 dark:text-green-400' : 'text-red-500'}`}>{weeklyReview.avgCal.toLocaleString()}</span>
+                    </div>
+                    <div className="text-center bg-gray-50 dark:bg-gray-800 rounded-xl py-2.5">
+                      <p className="text-[8px] text-gray-400 uppercase tracking-widest font-bold mb-1">Tốt nhất</p>
+                      <span className="text-xl font-black text-black dark:text-white">{weeklyReview.best.earnedPoints ?? 0}</span>
+                    </div>
+                  </div>
+                  {weeklyReview.weakestTask && (
+                    <div className="bg-red-50 dark:bg-red-900/20 rounded-xl p-2.5 border border-red-100 dark:border-red-900/30">
+                      <p className="text-[9px] text-red-500 uppercase tracking-widest font-bold mb-0.5">Task yếu nhất tuần</p>
+                      <p className="text-[11px] text-gray-700 dark:text-gray-300 leading-snug line-clamp-2">{weeklyReview.weakestTask.text}</p>
+                      <p className="text-[10px] text-red-500 font-bold mt-0.5">TB {weeklyReview.weakestTask.avg}/100</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Recharts bar chart — 30 days scrollable */}
               <div className={`${card} p-4 shadow-sm`}>
                 <div className="flex justify-between items-center mb-3">
@@ -1020,7 +1148,7 @@ export default function App() {
                   <span className="text-[10px] text-gray-400 italic">← vuốt</span>
                 </div>
                 <div ref={calChartScrollRef} className="overflow-x-auto -mx-4 px-2" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-                  <BarChart width={calChartData.length * 36} height={200} data={calChartData} margin={{ top: 20, right: 12, left: -10, bottom: 0 }}>
+                  <ComposedChart width={calChartDataWithAvg.length * 36} height={200} data={calChartDataWithAvg} margin={{ top: 20, right: 12, left: -10, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#374151' : '#f3f4f6'} vertical={false} />
                     <XAxis dataKey="day" tick={{ fontSize: 9, fill: axisColor }} axisLine={false} tickLine={false} interval={0} />
                     {/* Domain: từ 0 đến max(data, budget*1.3) — đảm bảo bar overbudget + đường kẻ đều hiển thị */}
@@ -1041,23 +1169,25 @@ export default function App() {
                       formatter={v => v != null ? [`${v} kcal`, 'Net'] : ['—', 'Chưa có']}
                     />
                     <Bar dataKey="net" radius={[3, 3, 0, 0]} maxBarSize={28} minPointSize={2}>
-                      {calChartData.map((entry, i) => (
+                      {calChartDataWithAvg.map((entry, i) => (
                         <Cell key={i} fill={
                           entry.net == null
                             ? 'transparent'
                             : entry.net <= calorieBudget
-                              ? (isDark ? '#ffffff' : '#111827')   /* đạt: đậm */
-                              : (isDark ? '#f87171' : '#ef4444')   /* vượt: đỏ rõ */
+                              ? (isDark ? '#ffffff' : '#111827')
+                              : (isDark ? '#f87171' : '#ef4444')
                         } />
                       ))}
                     </Bar>
-                  </BarChart>
+                    <Line type="monotone" dataKey="rollingAvg" stroke={isDark ? '#60a5fa' : '#3b82f6'} strokeWidth={2} dot={false} strokeDasharray="4 2" connectNulls={false} />
+                  </ComposedChart>
                 </div>
-                <div className="flex gap-4 mt-3 justify-center">
+                <div className="flex gap-3 mt-3 justify-center flex-wrap">
                   {[
-                    { color: isDark ? 'bg-white' : 'bg-gray-900', label: `≤ ${calorieBudget} (đạt)` },
-                    { color: 'bg-red-400',                         label: `> ${calorieBudget} (vượt)` },
-                    { color: 'bg-yellow-400',                      label: 'Đường budget' },
+                    { color: isDark ? 'bg-white' : 'bg-gray-900', label: `≤ ${calorieBudget}` },
+                    { color: 'bg-red-400',                         label: `Vượt budget` },
+                    { color: 'bg-yellow-400',                      label: 'Budget' },
+                    { color: 'bg-blue-400',                        label: 'TB 7 ngày' },
                   ].map(l => (
                     <div key={l.label} className="flex items-center gap-1.5">
                       <div className={`w-2.5 h-2.5 rounded-sm ${l.color}`} />
@@ -1153,6 +1283,32 @@ export default function App() {
               {/* ── SETTINGS ─────────────────────────────────────────────── */}
               <div className="flex items-center pt-1"><div className={`flex-1 ${divider}`} /><span className="px-3 text-[11px] font-bold text-gray-400 uppercase tracking-widest">Cài đặt</span><div className={`flex-1 ${divider}`} /></div>
 
+              {/* Monthly goal */}
+              <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 space-y-2">
+                <p className="text-[13px] font-bold text-black dark:text-white">🎯 Mục tiêu tháng</p>
+                {editingGoal ? (
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={monthlyGoal}
+                      onChange={e => setMonthlyGoal(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') { localStorage.setItem('monthlyGoal', monthlyGoal); setEditingGoal(false); } }}
+                      placeholder="Vd: Chạy 20km tháng này..."
+                      autoFocus
+                      className="flex-1 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm outline-none text-gray-700 dark:text-gray-200 focus:border-black dark:focus:border-white"
+                    />
+                    <button onClick={() => { localStorage.setItem('monthlyGoal', monthlyGoal); setEditingGoal(false); }}
+                      className="px-3 py-2 bg-black dark:bg-white text-white dark:text-black text-xs font-bold rounded-lg">Lưu</button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <p className="flex-1 text-[12px] text-gray-600 dark:text-gray-400 italic">{monthlyGoal || 'Chưa đặt mục tiêu'}</p>
+                    <button onClick={() => setEditingGoal(true)} className="text-[11px] text-gray-400 underline">sửa</button>
+                    {monthlyGoal && <button onClick={() => { setMonthlyGoal(''); localStorage.removeItem('monthlyGoal'); }} className="text-[11px] text-gray-400 underline">xóa</button>}
+                  </div>
+                )}
+              </div>
+
               {/* Custom calorie budget */}
               <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 space-y-1">
                 <p className="text-[13px] font-bold text-black dark:text-white">🎯 Budget calo / ngày</p>
@@ -1240,6 +1396,40 @@ export default function App() {
             ))}
           </div>
         </div>
+
+        {/* ── COMMENT HISTORY MODAL ──────────────────────────────────────── */}
+        {commentHistoryTaskId && (() => {
+          const hist = getTaskCommentHistory(commentHistoryTaskId);
+          const taskBase = baseTasks.find(b => b.id === commentHistoryTaskId);
+          return (
+            <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-end justify-center" onClick={() => setCommentHistoryTaskId(null)}>
+              <div className="bg-white dark:bg-gray-900 border dark:border-gray-700 rounded-t-3xl p-6 w-full max-w-md shadow-xl max-h-[70vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-between items-start mb-4">
+                  <div className="flex-1 pr-4">
+                    <h3 className="text-sm font-black text-black dark:text-white mb-0.5">Lịch sử ghi chú</h3>
+                    <p className="text-[11px] text-gray-400 leading-snug">{taskBase?.text}</p>
+                  </div>
+                  <button onClick={() => setCommentHistoryTaskId(null)} className="text-gray-400 hover:text-black dark:hover:text-white p-1 flex-shrink-0">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                </div>
+                {hist.length === 0 ? (
+                  <p className="text-sm text-gray-400 italic text-center py-8">Chưa có ghi chú nào</p>
+                ) : (
+                  <div className="space-y-2.5">
+                    {hist.map((h, i) => (
+                      <div key={i} className="bg-gray-50 dark:bg-gray-800 rounded-xl p-3 border border-gray-100 dark:border-gray-700">
+                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-1">{h.date}</p>
+                        <p className="text-[13px] text-gray-700 dark:text-gray-300 italic">"{h.comment}"</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="h-4" />
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ── MODAL ──────────────────────────────────────────────────────── */}
         {showConfirmModal && !isSubmitted && (

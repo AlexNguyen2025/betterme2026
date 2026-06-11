@@ -182,7 +182,7 @@ netCal = foodCal + ruouCal + ruouVangCal + bia500Cal + bia330Cal − burnedCal
 - Heatmap tháng hiện tại
 
 **Export:** Excel + JSON backup  
-**Settings:** Custom budget calo + Notification toggle (với iOS instructions)
+**Settings:** Monthly goal + Custom budget calo + Notification toggle (với iOS instructions)
 
 ### Global
 - **PIN gate** `0009` — hỏi mật khẩu mỗi session mới
@@ -352,7 +352,8 @@ service cloud.firestore {
 | v5 | 2026-06-05 | Nutrition UX: bỏ text input, rượu vang, streak calo đen, bar chart đậm/nhạt/trống |
 | v6 | 2026-06-05 | PWA PNG icons, custom budget, advanced stats (heatmap/best day/weakest cat), iOS notif |
 | v7 | 2026-06-08 | PIN gate (0009), auto-logout 1 phút idle, auto-submit ngày trước, fix calorie chart overbudget, fix unlock immediate |
+| v8 | 2026-06-11 | Weekly review 7 ngày, trend arrow điểm so 7 ngày, task comment history, monthly goal, calorie rolling avg 7 ngày |
 
 ---
 
-*Cập nhật lần cuối: 2026-06-08 — v7 final.*
+*Cập nhật lần cuối: 2026-06-11 — v8.*
