@@ -775,7 +775,7 @@ export default function App() {
               )}
               <div className="px-5 py-4 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700">
                 <p className="text-[13.5px] text-gray-500 dark:text-gray-400 italic leading-relaxed text-center font-medium">
-                  "Mục tiêu của bạn cần một người nuôi dưỡng chăm sóc vun trồng mỗi ngày" - Jim Rohn
+                  "Thế giới này luôn mong ngóng sự gục ngã của bạn để có thể hả hê cười vào mặt bạn, đừng cho chúng nó cơ hội làm việc đó" - Antoine tháng 6/2026
                 </p>
               </div>
 
