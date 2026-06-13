@@ -125,7 +125,7 @@ export default function App() {
   // ── Auto-logout after 1 min idle ─────────────────────────────────────────
   useEffect(() => {
     if (!isAuthed) return;
-    const IDLE_MS = 60_000;
+    const IDLE_MS = 300_000;
     let timer;
     const reset = () => {
       clearTimeout(timer);
@@ -402,6 +402,8 @@ export default function App() {
   };
 
   const getScoreTrend = () => {
+    const hasRatedTasks = todayTasks.some(t => t.status !== 'pending' && t.status !== 'na');
+    if (!hasRatedTasks) return null;
     const last7 = [];
     const today = new Date();
     for (let i = 1; i <= 7; i++) {
@@ -502,6 +504,11 @@ export default function App() {
   const heatmapCells = getMonthHeatmap();
   const scoreTrend = getScoreTrend();
   const weeklyReview = getWeeklyReview();
+  const taskIdsWithHistory = new Set(
+    history
+      .filter(h => h.status === 'submitted')
+      .flatMap(h => (h.tasks || []).filter(t => t.comment).map(t => t.id))
+  );
   const calChartDataWithAvg = calChartData.map((d, i, arr) => {
     const w = arr.slice(Math.max(0, i - 6), i + 1).filter(x => x.net != null);
     const avg = w.length ? Math.round(w.reduce((s, x) => s + x.net, 0) / w.length) : null;
@@ -766,9 +773,10 @@ export default function App() {
                     <div className="flex items-end gap-2">
                       <span className="text-4xl font-black">{score.earned}</span>
                       {scoreTrend && (
-                        <span className={`text-sm font-bold pb-1 ${scoreTrend.diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {scoreTrend.diff >= 0 ? '↑' : '↓'}{Math.abs(scoreTrend.diff)}
-                        </span>
+                        <div className={`flex flex-col pb-1 ${scoreTrend.diff >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          <span className="text-sm font-bold leading-none">{scoreTrend.diff >= 0 ? '↑' : '↓'}{Math.abs(scoreTrend.diff)}</span>
+                          <span className="text-[9px] font-normal opacity-70 mt-0.5">vs TB 7n</span>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -779,6 +787,13 @@ export default function App() {
                 </div>
               </div>
 
+              {!isSubmitted && todayTasks.length > 0 && todayTasks.every(t => t.status === 'pending') && (
+                <div className="text-center py-2">
+                  <p className="text-xl mb-1">☀️</p>
+                  <p className="text-[13px] font-bold text-gray-700 dark:text-gray-300">Ngày mới bắt đầu!</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Bắt đầu đánh giá task đầu tiên nhé.</p>
+                </div>
+              )}
               {isSubmitted && <div className="text-center text-xs tracking-widest text-gray-400 uppercase py-2">— DỮ LIỆU ĐÃ KHÓA —</div>}
 
               {/* Tasks by category */}
@@ -841,12 +856,14 @@ export default function App() {
                                   : 'bg-gray-50 dark:bg-gray-800 border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-300 focus:bg-white dark:focus:bg-gray-700 focus:border-gray-300 dark:focus:border-gray-600'
                                 }`}
                               />
-                              <button
-                                onClick={() => setCommentHistoryTaskId(base.id)}
-                                className="flex-shrink-0 p-2 text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 transition-colors"
-                              >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                              </button>
+                              {taskIdsWithHistory.has(base.id) && (
+                                <button
+                                  onClick={() => setCommentHistoryTaskId(base.id)}
+                                  className="flex-shrink-0 p-2 text-gray-400 dark:text-gray-500 hover:text-black dark:hover:text-white transition-colors"
+                                >
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
