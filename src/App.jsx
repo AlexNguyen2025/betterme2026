@@ -108,6 +108,7 @@ export default function App() {
   const [commentHistoryTaskId, setCommentHistoryTaskId] = useState(null);
   const [monthlyGoal, setMonthlyGoal] = useState(() => localStorage.getItem('monthlyGoal') || '');
   const [editingGoal, setEditingGoal] = useState(false);
+  const [showCelebration, setShowCelebration] = useState(false);
 
   // ── iOS detection (computed once) ───────────────────────────────────────
   const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
@@ -422,15 +423,24 @@ export default function App() {
   const getWeeklyReview = () => {
     const today = new Date();
     const logs = [];
+    const prevLogs = [];
     for (let i = 0; i < 7; i++) {
       const d = new Date(today);
       d.setDate(today.getDate() - i);
       const log = history.find(h => h.date === getDateStr(d));
       if (log?.status === 'submitted') logs.push(log);
     }
+    for (let i = 7; i < 14; i++) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const log = history.find(h => h.date === getDateStr(d));
+      if (log?.status === 'submitted') prevLogs.push(log);
+    }
     if (!logs.length) return null;
     const avgScore = Math.round(logs.reduce((s, l) => s + (l.earnedPoints ?? 0), 0) / logs.length);
     const avgCal = Math.round(logs.reduce((s, l) => s + getLogNet(l), 0) / logs.length);
+    const prevAvgScore = prevLogs.length ? Math.round(prevLogs.reduce((s, l) => s + (l.earnedPoints ?? 0), 0) / prevLogs.length) : null;
+    const prevAvgCal = prevLogs.length ? Math.round(prevLogs.reduce((s, l) => s + getLogNet(l), 0) / prevLogs.length) : null;
     const best = logs.reduce((b, l) => (l.earnedPoints ?? 0) > (b.earnedPoints ?? 0) ? l : b);
     const taskTotals = {};
     baseTasks.forEach(b => { taskTotals[b.id] = { sum: 0, count: 0, text: b.text }; });
@@ -452,7 +462,7 @@ export default function App() {
         if (avg < low) { low = avg; weakestTask = { text: v.text, avg }; }
       }
     });
-    return { avgScore, avgCal, best, weakestTask, count: logs.length };
+    return { avgScore, avgCal, prevAvgScore, prevAvgCal, best, weakestTask, count: logs.length };
   };
 
   const getTaskCommentHistory = (taskId) => {
@@ -622,6 +632,10 @@ export default function App() {
   const confirmSubmit = async () => {
     setShowConfirmModal(false);
     setIsSubmitted(true);
+    if (score.earned >= STREAK_MIN) {
+      setShowCelebration(true);
+      setTimeout(() => setShowCelebration(false), 3500);
+    }
     // Chốt ngày hiện tại (đầy đủ, có netCalories)
     await syncToCloud(todayTasks, dailyJournal, meals, reflections, 'submitted');
     // Auto-chốt tất cả ngày draft trước ngày này
@@ -1075,15 +1089,25 @@ export default function App() {
                     <span className="text-[10px] text-gray-400">{weeklyReview.count} ngày đã chốt</span>
                   </div>
                   <div className="grid grid-cols-3 gap-2 mb-3">
-                    <div className="text-center bg-gray-50 dark:bg-gray-800 rounded-xl py-2.5">
+                    <div className="text-center bg-gray-50 dark:bg-gray-800 rounded-xl py-2.5 px-1">
                       <p className="text-[8px] text-gray-400 uppercase tracking-widest font-bold mb-1">TB điểm</p>
                       <span className="text-xl font-black text-black dark:text-white">{weeklyReview.avgScore}</span>
+                      {weeklyReview.prevAvgScore != null && (
+                        <p className={`text-[9px] font-bold mt-0.5 ${weeklyReview.avgScore >= weeklyReview.prevAvgScore ? 'text-green-500' : 'text-red-400'}`}>
+                          {weeklyReview.avgScore >= weeklyReview.prevAvgScore ? '↑' : '↓'}{Math.abs(weeklyReview.avgScore - weeklyReview.prevAvgScore)} vs T.trước
+                        </p>
+                      )}
                     </div>
-                    <div className="text-center bg-gray-50 dark:bg-gray-800 rounded-xl py-2.5">
+                    <div className="text-center bg-gray-50 dark:bg-gray-800 rounded-xl py-2.5 px-1">
                       <p className="text-[8px] text-gray-400 uppercase tracking-widest font-bold mb-1">TB calo</p>
                       <span className={`text-xl font-black ${weeklyReview.avgCal <= calorieBudget ? 'text-green-600 dark:text-green-400' : 'text-red-500'}`}>{weeklyReview.avgCal.toLocaleString()}</span>
+                      {weeklyReview.prevAvgCal != null && (
+                        <p className={`text-[9px] font-bold mt-0.5 ${weeklyReview.avgCal <= weeklyReview.prevAvgCal ? 'text-green-500' : 'text-red-400'}`}>
+                          {weeklyReview.avgCal <= weeklyReview.prevAvgCal ? '↓' : '↑'}{Math.abs(weeklyReview.avgCal - weeklyReview.prevAvgCal)} vs T.trước
+                        </p>
+                      )}
                     </div>
-                    <div className="text-center bg-gray-50 dark:bg-gray-800 rounded-xl py-2.5">
+                    <div className="text-center bg-gray-50 dark:bg-gray-800 rounded-xl py-2.5 px-1">
                       <p className="text-[8px] text-gray-400 uppercase tracking-widest font-bold mb-1">Tốt nhất</p>
                       <span className="text-xl font-black text-black dark:text-white">{weeklyReview.best.earnedPoints ?? 0}</span>
                     </div>
@@ -1413,6 +1437,34 @@ export default function App() {
             ))}
           </div>
         </div>
+
+        {/* ── CONFETTI CELEBRATION ───────────────────────────────────────── */}
+        {showCelebration && (
+          <>
+            <style>{`@keyframes cfFall{0%{transform:translateY(0) rotate(0deg);opacity:1}80%{opacity:1}100%{transform:translateY(110vh) rotate(720deg);opacity:0}}@keyframes cfPop{0%{transform:scale(0.7);opacity:0}20%{transform:scale(1.05);opacity:1}90%{opacity:1}100%{opacity:0}}`}</style>
+            <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
+              {Array.from({ length: 55 }, (_, i) => (
+                <div key={i} style={{
+                  position: 'absolute',
+                  left: `${(i * 179) % 100}%`,
+                  top: `-${8 + (i % 6) * 8}px`,
+                  width: `${6 + (i % 4) * 3}px`,
+                  height: `${6 + (i % 4) * 3}px`,
+                  backgroundColor: ['#f87171','#fb923c','#facc15','#4ade80','#60a5fa','#a78bfa','#f472b6','#34d399','#38bdf8','#c084fc'][i % 10],
+                  borderRadius: i % 3 === 0 ? '50%' : i % 3 === 1 ? '2px' : '30% 70% 70% 30% / 30% 30% 70% 70%',
+                  animation: `cfFall ${1.8 + (i % 12) * 0.12}s ${(i * 0.055) % 2.5}s ease-in forwards`,
+                }} />
+              ))}
+              <div className="absolute inset-0 flex items-center justify-center pb-24">
+                <div className="bg-black/80 backdrop-blur-sm rounded-3xl px-8 py-5 text-center" style={{ animation: 'cfPop 3s 0.1s ease forwards' }}>
+                  <p className="text-4xl mb-2">{score.earned >= 90 ? '🏆' : '🎉'}</p>
+                  <p className="text-white font-black text-2xl tracking-tight">{score.earned} điểm!</p>
+                  <p className="text-gray-300 text-xs mt-1 tracking-widest uppercase">{score.earned >= 90 ? 'Ngày xuất sắc!' : 'Ngày tốt!'}</p>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
 
         {/* ── COMMENT HISTORY MODAL ──────────────────────────────────────── */}
         {commentHistoryTaskId && (() => {
